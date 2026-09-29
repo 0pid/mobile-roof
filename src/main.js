@@ -155,6 +155,32 @@ function simplifyHull(hull, maximumPoints=12) {
   return result;
 }
 
+function radiateRoofBoundary(seeds, pixelAt, palette, cols, rows, tolerance) {
+  const center=seeds.reduce((sum,seed)=>({x:sum.x+seed.x/seeds.length,y:sum.y+seed.y/seeds.length}),{x:0,y:0});
+  const matches=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
+  const boundary=[], rayCount=48, maximumTravel=Math.ceil(Math.min(cols,rows)*.24);
+  for(let ray=0;ray<rayCount;ray++) {
+    const angle=ray/rayCount*Math.PI*2, direction={x:Math.cos(angle),y:Math.sin(angle)};
+    const origin=seeds.reduce((furthest,seed)=>{
+      const projection=(seed.x-center.x)*direction.x+(seed.y-center.y)*direction.y;
+      return projection>furthest.projection?{seed,projection}:furthest;
+    },{seed:seeds[0],projection:-Infinity}).seed;
+    let lastInside={x:origin.x,y:origin.y}, mismatchStart=null, mismatches=0;
+    for(let distance=1;distance<=maximumTravel;distance++) {
+      const x=Math.round(origin.x+direction.x*distance), y=Math.round(origin.y+direction.y*distance);
+      if(x<1||y<1||x>=cols-1||y>=rows-1)break;
+      if(matches(pixelAt(x,y))) { lastInside={x,y}; mismatchStart=null; mismatches=0; }
+      else {
+        if(!mismatchStart)mismatchStart={x:lastInside.x,y:lastInside.y};
+        mismatches++;
+        if(mismatches>=3)break;
+      }
+    }
+    boundary.push(mismatchStart||lastInside);
+  }
+  return boundary;
+}
+
 function tracePaintedRegion(stagePoints, tolerance=34) {
   const width=imageryCanvas.width, height=imageryCanvas.height;
   if (!width || !height || !stagePoints.length) return null;
@@ -189,8 +215,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
   const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
   if(count<8 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.2) return null;
-  const boundary=[];
-  for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(mask[y*cols+x] && (!mask[y*cols+x-1]||!mask[y*cols+x+1]||!mask[(y-1)*cols+x]||!mask[(y+1)*cols+x])) boundary.push({x:x*step,y:y*step});
+  const boundary=radiateRoofBoundary(seeds,pixelAt,palette,cols,rows,tolerance).map(point=>({x:point.x*step,y:point.y*step}));
   if(boundary.length<3)return null;
   return {mask,cols,rows,step,count,boundary,palette};
 }
@@ -207,7 +232,7 @@ function magicSelect(stroke) {
   const pulse = document.querySelector('#selectionPulse');
   pulse.innerHTML = `<polyline class="paint-stroke processing" points="${stroke.map(point=>`${point.x},${point.y}`).join(' ')}"/>`;
   document.querySelector('#magicTip strong').textContent = 'Finding matching roof pixels…';
-  document.querySelector('#magicTip span').textContent = 'Analyzing color and connected edges';
+  document.querySelector('#magicTip span').textContent = 'Expanding your samples outward to find the roof border';
   window.setTimeout(() => {
     let selection;
     try {
@@ -226,7 +251,7 @@ function magicSelect(stroke) {
       document.querySelector('#magicTip span').textContent='Paint a longer stroke inside the roof, including a light and dark section.';
       toast('Not enough roof detail yet — paint a slightly longer stroke'); return;
     }
-    const hull=simplifyHull(convexHull(selection.boundary));
+    const hull=simplifyHull(convexHull(selection.boundary),8);
     points=hull.map(stageToSvg);
     extraLines = [];
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
@@ -235,7 +260,7 @@ function magicSelect(stroke) {
     selectedLine = 0;
     pulse.innerHTML = '';
     document.querySelector('#magicTip strong').textContent = 'Roof surface selected';
-    document.querySelector('#magicTip span').textContent = `${points.length} editable corners found from the selected pixels.`;
+    document.querySelector('#magicTip span').textContent = `${points.length} border corners found from your painted roof sample.`;
     render(); toast('Magic lasso traced the connected roof color');
   }, 700);
 }
