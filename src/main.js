@@ -9,7 +9,7 @@ let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
 let tileRenderId = 0;
 const loadedTiles = [];
-const mapZoom = 19;
+let mapZoom = 20;
 const colors = { Eave:'#e8f880', Ridge:'#e4c557', Hip:'#6db5a4', Valley:'#f07d69', Rake:'#728dc4' };
 const canvas = document.querySelector('#roofCanvas');
 const lineLayer = document.querySelector('#lineLayer');
@@ -306,12 +306,29 @@ function renderTiles(){
   }
 }
 
+function clearRoofSelection() {
+  points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
+  selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
+  document.querySelector('#selectionPulse').innerHTML='';
+  setTool('magic'); render();
+}
+
+function updateZoom(delta) {
+  const nextZoom=Math.max(18,Math.min(21,mapZoom+delta));
+  if(nextZoom===mapZoom){toast(delta>0?'Maximum imagery detail reached':'Minimum imagery detail reached');return;}
+  mapZoom=nextZoom; clearRoofSelection(); renderTiles();
+  document.querySelector('#zoomLevel').textContent=mapZoom;
+  document.querySelector('#zoomIn').disabled=mapZoom===21;
+  document.querySelector('#zoomOut').disabled=mapZoom===18;
+  toast(`Zoom ${mapZoom} — paint the roof again at this detail`);
+}
+
 function propertyName(address) { return address.split(',')[0].trim() || address; }
 function showProperty(address) {
   document.querySelector('#locationAddress').textContent=address;
   document.querySelector('#mapLocation strong').textContent=propertyName(address);
   document.querySelector('#locationStatus').classList.add('visible');
-  points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0; selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height); setTool('magic'); render();
+  clearRoofSelection();
   document.querySelector('#magicTip').classList.remove('hidden');
   document.querySelector('#magicTip strong').textContent='Paint across a roof with the magic lasso';
   document.querySelector('#magicTip span').textContent='Drag to sample its light, dark, and textured areas.';
@@ -328,8 +345,8 @@ document.querySelector('#shareBtn').addEventListener('click',async()=>{const dat
 document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
 document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
-document.querySelector('#zoomIn').addEventListener('click',()=>toast('Imagery is at maximum detail'));
-document.querySelector('#zoomOut').addEventListener('click',()=>toast('Zoom out is available in the full map'));
+document.querySelector('#zoomIn').addEventListener('click',()=>updateZoom(1));
+document.querySelector('#zoomOut').addEventListener('click',()=>updateZoom(-1));
 document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{setTool(button.dataset.tool);toast(`${button.dataset.tool==='magic'?'Magic lasso':button.dataset.tool==='vertex'?'Add vertex':'Pan'} tool active`);}));
 window.addEventListener('resize',renderTiles);
 renderTiles(); render();
