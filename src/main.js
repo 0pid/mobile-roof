@@ -3,6 +3,8 @@ let extraLines = [];
 let selectedLine = -1;
 let dragging = null;
 let activeTool = 'magic';
+let painting = false;
+let paintPoints = [];
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
 let tileRenderId = 0;
@@ -33,7 +35,7 @@ function updateProgress() {
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
     ? 'Drag any point to adjust the outline, or add a vertex for more detail. Then select a line to classify it.'
-    : 'Choose the magic lasso and touch a roof surface in the aerial image. Add or drag vertices to refine the result.';
+    : 'Choose the magic lasso, then drag across a roof surface to paint a sample. Add or drag vertices to refine the result.';
 }
 
 function render() {
@@ -153,21 +155,24 @@ function simplifyHull(hull, maximumPoints=12) {
   return result;
 }
 
-function traceConnectedColor(stageX, stageY, tolerance=34) {
+function tracePaintedRegion(stagePoints, tolerance=34) {
   const width=imageryCanvas.width, height=imageryCanvas.height;
-  if (!width || !height) return null;
+  if (!width || !height || !stagePoints.length) return null;
   const source=imageryCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,width,height).data;
   const step=3, cols=Math.ceil(width/step), rows=Math.ceil(height/step);
-  const seedX=Math.max(0,Math.min(cols-1,Math.floor(stageX/step)));
-  const seedY=Math.max(0,Math.min(rows-1,Math.floor(stageY/step)));
+  const seeds=stagePoints.map(point=>({x:Math.max(0,Math.min(cols-1,Math.floor(point.x/step))),y:Math.max(0,Math.min(rows-1,Math.floor(point.y/step)))}));
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
-  const seed=pixelAt(seedX,seedY); if(seed[3]<200)return null;
-  const palette=sampleColorPalette(pixelAt,seedX,seedY,cols,rows); if(!palette.length)return null;
+  if(seeds.some(seed=>pixelAt(seed.x,seed.y)[3]<200))return null;
+  const palette=[];
+  seeds.forEach(seed=>sampleColorPalette(pixelAt,seed.x,seed.y,cols,rows).forEach(color=>{
+    if(palette.length<16 && !palette.some(existing=>colorDistance(existing,color)<9))palette.push(color);
+  }));
+  if(!palette.length)return null;
   const matchesPalette=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
   const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
-  const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=1;
-  queueX[0]=seedX; queueY[0]=seedY; visited[seedY*cols+seedX]=1;
-  let count=0, minX=seedX, maxX=seedX, minY=seedY, maxY=seedY;
+  const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=0;
+  seeds.forEach(seed=>{const index=seed.y*cols+seed.x;if(!visited[index]){visited[index]=1;queueX[tail]=seed.x;queueY[tail++]=seed.y;}});
+  let count=0, minX=seeds[0].x, maxX=seeds[0].x, minY=seeds[0].y, maxY=seeds[0].y;
   const maximumPixels=Math.floor(cols*rows*.12);
   while(head<tail) {
     const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
@@ -197,18 +202,18 @@ function drawSelectionMask(selection) {
   for(let y=0;y<selection.rows;y++) for(let x=0;x<selection.cols;x++) if(selection.mask[y*selection.cols+x]) context.fillRect(x*selection.step,y*selection.step,selection.step,selection.step);
 }
 
-function magicSelect(point) {
+function magicSelect(stroke) {
   if (points.length) return;
   const pulse = document.querySelector('#selectionPulse');
-  pulse.innerHTML = `<circle class="scan-ring" cx="${point.x}" cy="${point.y}" r="18"/>`;
+  pulse.innerHTML = `<polyline class="paint-stroke processing" points="${stroke.map(point=>`${point.x},${point.y}`).join(' ')}"/>`;
   document.querySelector('#magicTip strong').textContent = 'Finding matching roof pixels…';
   document.querySelector('#magicTip span').textContent = 'Analyzing color and connected edges';
   window.setTimeout(() => {
     let selection;
     try {
-      const stagePoint=svgToStage(point);
+      const stagePoints=stroke.map(svgToStage);
       for(const tolerance of [16,22,28,34,40]) {
-        const candidate=traceConnectedColor(stagePoint.x,stagePoint.y,tolerance);
+        const candidate=tracePaintedRegion(stagePoints,tolerance);
         if(!candidate)continue;
         if(selection && candidate.count>selection.count*1.65)break;
         selection=candidate;
@@ -235,10 +240,25 @@ function magicSelect(point) {
   }, 700);
 }
 
+function appendPaintPoint(event) {
+  const point=toSvg(event), previous=paintPoints.at(-1);
+  if(previous && Math.hypot(point.x-previous.x,point.y-previous.y)<9)return;
+  paintPoints.push({x:point.x,y:point.y});
+  document.querySelector('#selectionPulse').innerHTML=`<polyline class="paint-stroke" points="${paintPoints.map(item=>`${item.x},${item.y}`).join(' ')}"/>`;
+}
 canvas.addEventListener('pointerdown', event => {
-  if (event.target !== canvas && event.target !== roofFill) return;
-  if (activeTool === 'magic') magicSelect(toSvg(event));
+  if(activeTool!=='magic' || points.length)return;
+  event.preventDefault(); painting=true; paintPoints=[]; canvas.setPointerCapture(event.pointerId); appendPaintPoint(event);
+  document.querySelector('#magicTip strong').textContent='Paint across the roof plane';
+  document.querySelector('#magicTip span').textContent='Release when the roof surface is covered.';
 });
+canvas.addEventListener('pointermove', event=>{if(painting)appendPaintPoint(event);});
+canvas.addEventListener('pointerup', event=>{
+  if(!painting)return; appendPaintPoint(event); painting=false;
+  if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+  magicSelect([...paintPoints]);
+});
+canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];document.querySelector('#selectionPulse').innerHTML='';});
 
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
@@ -283,8 +303,8 @@ function showProperty(address) {
   document.querySelector('#locationStatus').classList.add('visible');
   points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0; selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height); setTool('magic'); render();
   document.querySelector('#magicTip').classList.remove('hidden');
-  document.querySelector('#magicTip strong').textContent='Touch a roof with the magic lasso';
-  document.querySelector('#magicTip span').textContent='We’ll follow connected pixels with similar colors.';
+  document.querySelector('#magicTip strong').textContent='Paint across a roof with the magic lasso';
+  document.querySelector('#magicTip span').textContent='Drag to sample its light, dark, and textured areas.';
 }
 document.querySelector('#addressForm').addEventListener('submit',async event=>{
   event.preventDefault(); const input=document.querySelector('#address'); const address=input.value.trim(); if(!address){input.focus();toast('Enter a property address first');return;}
