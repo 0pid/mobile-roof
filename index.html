@@ -27,7 +27,7 @@
         <div class="panel-top">
           <div class="eyebrow"><span class="status-dot"></span> New measurement</div>
           <h1>Trace the roof.<br><em>We’ll find the edges.</em></h1>
-          <p class="intro">Search for a property, then touch the roof in the aerial image. Magic select finds similar surfaces to create an editable outline.</p>
+          <p class="intro">Search for a property, then touch the roof in the aerial image. The magic lasso follows similar surfaces to create an editable outline.</p>
 
           <form class="search-card" id="addressForm">
             <label for="address">Property address</label>
@@ -63,7 +63,7 @@
           <div class="map-location" id="mapLocation"><span>●</span><div><small>CURRENT PROPERTY</small><strong>1227 West Cedar Canyons Road</strong></div></div>
 
           <div class="map-toolbar top-tools">
-            <button class="active magic-tool" data-tool="magic" aria-label="Magic select tool" title="Magic select">✦</button>
+            <button class="active magic-tool" data-tool="magic" aria-label="Magic lasso tool" title="Magic lasso">✦</button>
             <button data-tool="vertex" aria-label="Add vertex tool" title="Add vertex">＋</button>
             <button data-tool="pan" aria-label="Pan tool" title="Pan">✋</button>
             <span></span>
@@ -75,6 +75,7 @@
             <button id="zoomIn" aria-label="Zoom in">+</button><button id="zoomOut" aria-label="Zoom out">−</button>
           </div>
 
+          <canvas class="selection-mask" id="selectionMask" aria-hidden="true"></canvas>
           <svg class="roof-canvas" id="roofCanvas" viewBox="0 0 900 650" role="img" aria-label="Editable roof outline">
             <defs>
               <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity=".24"/></filter>
@@ -88,7 +89,7 @@
 
           <div class="magic-tip" id="magicTip">
             <div class="spark">✦</div>
-            <div><strong>Touch the roof to magic select</strong><span>We’ll group similar-colored roof surfaces.</span></div>
+            <div><strong>Touch a roof with the magic lasso</strong><span>We’ll follow connected pixels with similar colors.</span></div>
             <button aria-label="Dismiss" id="dismissTip">×</button>
           </div>
 

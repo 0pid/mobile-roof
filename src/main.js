@@ -4,12 +4,17 @@ let selectedLine = -1;
 let dragging = null;
 let activeTool = 'magic';
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
+let selectedAreaSquareFeet = 0;
+let tileRenderId = 0;
+const loadedTiles = [];
 const mapZoom = 19;
 const colors = { Eave:'#e8f880', Ridge:'#e4c557', Hip:'#6db5a4', Valley:'#f07d69', Rake:'#728dc4' };
 const canvas = document.querySelector('#roofCanvas');
 const lineLayer = document.querySelector('#lineLayer');
 const vertexLayer = document.querySelector('#vertexLayer');
 const roofFill = document.querySelector('#roofFill');
+const selectionMask = document.querySelector('#selectionMask');
+const imageryCanvas = document.createElement('canvas');
 
 function svgEl(name, attrs={}) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -21,7 +26,7 @@ function updateProgress() {
   const hasRoof = points.length > 2;
   document.querySelector('#lineCount').textContent = hasRoof ? points.length + extraLines.length : 0;
   document.querySelector('#vertexCount').textContent = points.length;
-  document.querySelector('#areaValue').textContent = hasRoof ? '2,486' : '—';
+  document.querySelector('#areaValue').textContent = hasRoof && selectedAreaSquareFeet ? Math.round(selectedAreaSquareFeet).toLocaleString() : '—';
   document.querySelector('#progressValue').textContent = hasRoof ? '42%' : '0%';
   document.querySelector('#progressBar').style.width = hasRoof ? '42%' : '0%';
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
@@ -77,6 +82,71 @@ function setTool(tool) {
   canvas.classList.toggle('adding-vertex', tool === 'vertex');
 }
 
+function colorDistance(a, b) {
+  const red = a[0]-b[0], green = a[1]-b[1], blue = a[2]-b[2];
+  return Math.sqrt(red*red*.3 + green*green*.59 + blue*blue*.11);
+}
+
+function convexHull(source) {
+  const sorted = [...source].sort((a,b) => a.x-b.x || a.y-b.y);
+  if (sorted.length < 4) return sorted;
+  const cross = (origin,a,b) => (a.x-origin.x)*(b.y-origin.y)-(a.y-origin.y)*(b.x-origin.x);
+  const lower=[]; for (const point of sorted) { while(lower.length>1 && cross(lower.at(-2),lower.at(-1),point)<=0) lower.pop(); lower.push(point); }
+  const upper=[]; for (const point of sorted.reverse()) { while(upper.length>1 && cross(upper.at(-2),upper.at(-1),point)<=0) upper.pop(); upper.push(point); }
+  lower.pop(); upper.pop(); return lower.concat(upper);
+}
+
+function simplifyHull(hull, maximumPoints=12) {
+  const result=[...hull];
+  while(result.length>maximumPoints) {
+    let removeAt=0, smallest=Infinity;
+    result.forEach((point,index) => {
+      const before=result[(index-1+result.length)%result.length], after=result[(index+1)%result.length];
+      const area=Math.abs((point.x-before.x)*(after.y-before.y)-(point.y-before.y)*(after.x-before.x));
+      if(area<smallest){smallest=area;removeAt=index;}
+    });
+    result.splice(removeAt,1);
+  }
+  return result;
+}
+
+function traceConnectedColor(stageX, stageY, tolerance=47) {
+  const width=imageryCanvas.width, height=imageryCanvas.height;
+  if (!width || !height) return null;
+  const source=imageryCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,width,height).data;
+  const step=3, cols=Math.ceil(width/step), rows=Math.ceil(height/step);
+  const seedX=Math.max(0,Math.min(cols-1,Math.floor(stageX/step)));
+  const seedY=Math.max(0,Math.min(rows-1,Math.floor(stageY/step)));
+  const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
+  const seed=pixelAt(seedX,seedY); if(seed[3]<200)return null;
+  const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
+  const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=1;
+  queueX[0]=seedX; queueY[0]=seedY; visited[seedY*cols+seedX]=1;
+  const boundary=[]; let count=0;
+  while(head<tail && count<cols*rows*.38) {
+    const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
+    if(colorDistance(current,seed)>tolerance) continue;
+    mask[index]=1; count++;
+    const neighbors=[[x+1,y],[x-1,y],[x,y+1],[x,y-1]];
+    for(const [nextX,nextY] of neighbors) {
+      if(nextX<0||nextY<0||nextX>=cols||nextY>=rows){boundary.push({x:x*step,y:y*step});continue;}
+      const nextIndex=nextY*cols+nextX;
+      if(!visited[nextIndex] && colorDistance(pixelAt(nextX,nextY),current)<34){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
+      if(visited[nextIndex] && !mask[nextIndex]) boundary.push({x:x*step,y:y*step});
+    }
+  }
+  if(count<35 || count>=cols*rows*.38) return null;
+  for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(mask[y*cols+x] && (!mask[y*cols+x-1]||!mask[y*cols+x+1]||!mask[(y-1)*cols+x]||!mask[(y+1)*cols+x])) boundary.push({x:x*step,y:y*step});
+  return {mask,cols,rows,step,count,boundary};
+}
+
+function drawSelectionMask(selection) {
+  const stage=document.querySelector('#mapStage'), width=stage.clientWidth, height=stage.clientHeight;
+  selectionMask.width=width; selectionMask.height=height;
+  const context=selectionMask.getContext('2d'); context.clearRect(0,0,width,height); context.fillStyle='rgba(217,239,115,.28)';
+  for(let y=0;y<selection.rows;y++) for(let x=0;x<selection.cols;x++) if(selection.mask[y*selection.cols+x]) context.fillRect(x*selection.step,y*selection.step,selection.step,selection.step);
+}
+
 function magicSelect(point) {
   if (points.length) return;
   const pulse = document.querySelector('#selectionPulse');
@@ -84,17 +154,27 @@ function magicSelect(point) {
   document.querySelector('#magicTip strong').textContent = 'Finding matching roof pixels…';
   document.querySelector('#magicTip span').textContent = 'Analyzing color and connected edges';
   window.setTimeout(() => {
-    const x=Math.max(155,Math.min(745,point.x)); const y=Math.max(135,Math.min(505,point.y));
-    points = [
-      {x:x-166,y:y-70},{x:x-42,y:y-124},{x:x+153,y:y-65},
-      {x:x+170,y:y+77},{x:x+28,y:y+128},{x:x-157,y:y+72}
-    ];
-    extraLines = [{a:1,b:4,type:'Ridge'},{a:0,b:4,type:'Hip'},{a:2,b:4,type:'Valley'}];
+    const stage=document.querySelector('#mapStage');
+    let selection;
+    try { selection=traceConnectedColor(point.x/900*stage.clientWidth,point.y/650*stage.clientHeight); }
+    catch { selection=null; }
+    if(!selection) {
+      pulse.innerHTML='';
+      document.querySelector('#magicTip strong').textContent='No clear roof plane found';
+      document.querySelector('#magicTip span').textContent='Try a more uniform area near the center of the roof.';
+      toast('Could not isolate that color — try another roof area'); return;
+    }
+    const hull=simplifyHull(convexHull(selection.boundary));
+    points=hull.map(vertex=>({x:vertex.x/stage.clientWidth*900,y:vertex.y/stage.clientHeight*650}));
+    extraLines = [];
+    const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
+    selectedAreaSquareFeet=selection.count*selection.step**2*metersPerPixel**2*10.7639;
+    drawSelectionMask(selection);
     selectedLine = 0;
     pulse.innerHTML = '';
     document.querySelector('#magicTip strong').textContent = 'Roof surface selected';
-    document.querySelector('#magicTip span').textContent = 'Drag points or use + to add more vertices.';
-    render(); toast('Magic select created an editable outline');
+    document.querySelector('#magicTip span').textContent = `${points.length} editable corners found from the selected pixels.`;
+    render(); toast('Magic lasso traced the connected roof color');
   }, 700);
 }
 
@@ -110,20 +190,32 @@ document.querySelectorAll('.line-type').forEach(button => button.addEventListene
   selectType(type); render(); toast(`Line classified as ${type}`);
 }));
 document.querySelector('#dismissTip').addEventListener('click',()=>document.querySelector('#magicTip').classList.add('hidden'));
-document.querySelector('#addVertexBtn').addEventListener('click',()=>{ if(!points.length){toast('Magic select a roof first');return;} setTool('vertex');toast('Tap an outline edge to add a vertex'); });
+document.querySelector('#addVertexBtn').addEventListener('click',()=>{ if(!points.length){toast('Use the magic lasso on a roof first');return;} setTool('vertex');toast('Tap an outline edge to add a vertex'); });
 
 function lonToX(lon,z){ return (lon+180)/360*2**z; }
 function latToY(lat,z){ const rad=lat*Math.PI/180; return (1-Math.asinh(Math.tan(rad))/Math.PI)/2*2**z; }
 function renderTiles(){
   const layer=document.querySelector('#tileLayer'); layer.innerHTML='';
+  loadedTiles.length=0; const renderId=++tileRenderId;
   const centerX=lonToX(mapCenter.lon,mapZoom); const centerY=latToY(mapCenter.lat,mapZoom);
   const stage=document.querySelector('#mapStage'); const width=stage.clientWidth||900; const height=stage.clientHeight||650;
+  imageryCanvas.width=width; imageryCanvas.height=height;
   const startX=Math.floor(centerX-width/512)-1; const endX=Math.ceil(centerX+width/512)+1;
   const startY=Math.floor(centerY-height/512)-1; const endY=Math.ceil(centerY+height/512)+1;
   for(let x=startX;x<=endX;x++) for(let y=startY;y<=endY;y++){
     const image=new Image(); image.alt=''; image.draggable=false;
+    image.crossOrigin='anonymous';
+    const left=width/2+(x-centerX)*256, top=height/2+(y-centerY)*256;
+    image.style.left=`${left}px`; image.style.top=`${top}px`;
+    image.addEventListener('load',()=>{
+      if(renderId!==tileRenderId)return;
+      loadedTiles.push({image,left,top});
+      const context=imageryCanvas.getContext('2d',{willReadFrequently:true});
+      context.clearRect(0,0,width,height);
+      loadedTiles.forEach(tile=>context.drawImage(tile.image,tile.left,tile.top,256,256));
+    });
     image.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${mapZoom}/${y}/${x}`;
-    image.style.left=`${width/2+(x-centerX)*256}px`; image.style.top=`${height/2+(y-centerY)*256}px`; layer.append(image);
+    layer.append(image);
   }
 }
 
@@ -132,10 +224,10 @@ function showProperty(address) {
   document.querySelector('#locationAddress').textContent=address;
   document.querySelector('#mapLocation strong').textContent=propertyName(address);
   document.querySelector('#locationStatus').classList.add('visible');
-  points=[]; extraLines=[]; selectedLine=-1; setTool('magic'); render();
+  points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0; selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height); setTool('magic'); render();
   document.querySelector('#magicTip').classList.remove('hidden');
-  document.querySelector('#magicTip strong').textContent='Touch the roof to magic select';
-  document.querySelector('#magicTip span').textContent='We’ll group similar-colored roof surfaces.';
+  document.querySelector('#magicTip strong').textContent='Touch a roof with the magic lasso';
+  document.querySelector('#magicTip span').textContent='We’ll follow connected pixels with similar colors.';
 }
 document.querySelector('#addressForm').addEventListener('submit',async event=>{
   event.preventDefault(); const input=document.querySelector('#address'); const address=input.value.trim(); if(!address){input.focus();toast('Enter a property address first');return;}
@@ -147,10 +239,10 @@ document.querySelector('#addressForm').addEventListener('submit',async event=>{
 document.querySelector('#googleLink').addEventListener('click',()=>window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(document.querySelector('#address').value)}`,'_blank','noopener'));
 document.querySelector('#shareBtn').addEventListener('click',async()=>{const data={title:'Roofline measurement',text:'Review this roof measurement',url:location.href};if(navigator.share)await navigator.share(data);else{await navigator.clipboard?.writeText(location.href);toast('Share link copied');}});
 document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
-document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];extraLines=[];selectedLine=-1;render();toast('Roof selection removed');});
+document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
 document.querySelector('#zoomIn').addEventListener('click',()=>toast('Imagery is at maximum detail'));
 document.querySelector('#zoomOut').addEventListener('click',()=>toast('Zoom out is available in the full map'));
-document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{setTool(button.dataset.tool);toast(`${button.dataset.tool==='magic'?'Magic select':button.dataset.tool==='vertex'?'Add vertex':'Pan'} tool active`);}));
+document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{setTool(button.dataset.tool);toast(`${button.dataset.tool==='magic'?'Magic lasso':button.dataset.tool==='vertex'?'Add vertex':'Pan'} tool active`);}));
 window.addEventListener('resize',renderTiles);
 renderTiles(); render();
