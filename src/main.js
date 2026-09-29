@@ -73,6 +73,18 @@ function render() {
 }
 
 function toSvg(event) { const point=canvas.createSVGPoint(); point.x=event.clientX; point.y=event.clientY; return point.matrixTransform(canvas.getScreenCTM().inverse()); }
+function svgToStage(point) {
+  const svgPoint=canvas.createSVGPoint(); svgPoint.x=point.x; svgPoint.y=point.y;
+  const screenPoint=svgPoint.matrixTransform(canvas.getScreenCTM());
+  const stageBounds=document.querySelector('#mapStage').getBoundingClientRect();
+  return {x:screenPoint.x-stageBounds.left,y:screenPoint.y-stageBounds.top};
+}
+function stageToSvg(point) {
+  const stageBounds=document.querySelector('#mapStage').getBoundingClientRect();
+  const screenPoint=canvas.createSVGPoint(); screenPoint.x=stageBounds.left+point.x; screenPoint.y=stageBounds.top+point.y;
+  const svgPoint=screenPoint.matrixTransform(canvas.getScreenCTM().inverse());
+  return {x:svgPoint.x,y:svgPoint.y};
+}
 function selectType(type) { document.querySelectorAll('.line-type').forEach(button => button.classList.toggle('selected',button.dataset.type===type)); }
 function toast(message) { const el=document.querySelector('#toast'); el.textContent=message; el.classList.add('show'); clearTimeout(toast.timer); toast.timer=setTimeout(()=>el.classList.remove('show'),1900); }
 
@@ -158,12 +170,11 @@ function magicSelect(point) {
   document.querySelector('#magicTip strong').textContent = 'Finding matching roof pixels…';
   document.querySelector('#magicTip span').textContent = 'Analyzing color and connected edges';
   window.setTimeout(() => {
-    const stage=document.querySelector('#mapStage');
     let selection;
     try {
-      const stageX=point.x/900*stage.clientWidth, stageY=point.y/650*stage.clientHeight;
+      const stagePoint=svgToStage(point);
       for(const tolerance of [25,31,37,43]) {
-        const candidate=traceConnectedColor(stageX,stageY,tolerance);
+        const candidate=traceConnectedColor(stagePoint.x,stagePoint.y,tolerance);
         if(candidate)selection=candidate;
       }
     }
@@ -175,7 +186,7 @@ function magicSelect(point) {
       toast('That color covers too much of the image — tap the roof itself'); return;
     }
     const hull=simplifyHull(convexHull(selection.boundary));
-    points=hull.map(vertex=>({x:vertex.x/stage.clientWidth*900,y:vertex.y/stage.clientHeight*650}));
+    points=hull.map(stageToSvg);
     extraLines = [];
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
     selectedAreaSquareFeet=selection.count*selection.step**2*metersPerPixel**2*10.7639;
