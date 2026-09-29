@@ -165,7 +165,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   if(seeds.some(seed=>pixelAt(seed.x,seed.y)[3]<200))return null;
   const palette=[];
   seeds.forEach(seed=>sampleColorPalette(pixelAt,seed.x,seed.y,cols,rows).forEach(color=>{
-    if(palette.length<16 && !palette.some(existing=>colorDistance(existing,color)<9))palette.push(color);
+    if(palette.length<8 && !palette.some(existing=>colorDistance(existing,color)<9))palette.push(color);
   }));
   if(!palette.length)return null;
   const matchesPalette=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
@@ -188,7 +188,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   }
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
   const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
-  if(count<35 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.28) return null;
+  if(count<8 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.2) return null;
   const boundary=[];
   for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(mask[y*cols+x] && (!mask[y*cols+x-1]||!mask[y*cols+x+1]||!mask[(y-1)*cols+x]||!mask[(y+1)*cols+x])) boundary.push({x:x*step,y:y*step});
   if(boundary.length<3)return null;
@@ -212,7 +212,7 @@ function magicSelect(stroke) {
     let selection;
     try {
       const stagePoints=stroke.map(svgToStage);
-      for(const tolerance of [16,22,28,34,40]) {
+      for(const tolerance of [8,12,16,22,28]) {
         const candidate=tracePaintedRegion(stagePoints,tolerance);
         if(!candidate)continue;
         if(selection && candidate.count>selection.count*1.65)break;
@@ -222,9 +222,9 @@ function magicSelect(stroke) {
     catch { selection=null; }
     if(!selection) {
       pulse.innerHTML='';
-      document.querySelector('#magicTip strong').textContent='No clear roof plane found';
-      document.querySelector('#magicTip span').textContent='Tap directly on a roof plane—not the surrounding lawn or road.';
-      toast('That color covers too much of the image — tap the roof itself'); return;
+      document.querySelector('#magicTip strong').textContent='Add a little more roof detail';
+      document.querySelector('#magicTip span').textContent='Paint a longer stroke inside the roof, including a light and dark section.';
+      toast('Not enough roof detail yet — paint a slightly longer stroke'); return;
     }
     const hull=simplifyHull(convexHull(selection.boundary));
     points=hull.map(stageToSvg);
