@@ -107,7 +107,8 @@ function sampleColorPalette(pixelAt, seedX, seedY, cols, rows) {
     const color=pixelAt(x,y); if(color[3]>200)samples.push(color.slice(0,3));
   }
   if(!samples.length)return [];
-  const centers=[samples[Math.floor(samples.length/2)]];
+  const seedColor=pixelAt(seedX,seedY).slice(0,3);
+  const centers=[seedColor];
   while(centers.length<Math.min(4,samples.length)) {
     const next=samples.reduce((best,color) => {
       const distance=Math.min(...centers.map(center=>colorDistance(color,center)));
@@ -116,8 +117,9 @@ function sampleColorPalette(pixelAt, seedX, seedY, cols, rows) {
     if(centers.some(center=>colorDistance(center,next)<6))break;
     centers.push(next);
   }
+  let groups=[];
   for(let iteration=0;iteration<5;iteration++) {
-    const groups=centers.map(()=>[]);
+    groups=centers.map(()=>[]);
     samples.forEach(color=>{
       let closest=0;
       centers.forEach((center,index)=>{if(colorDistance(color,center)<colorDistance(color,centers[closest]))closest=index;});
@@ -125,7 +127,7 @@ function sampleColorPalette(pixelAt, seedX, seedY, cols, rows) {
     });
     groups.forEach((group,index)=>{if(group.length)centers[index]=[0,1,2].map(channel=>group.reduce((sum,color)=>sum+color[channel],0)/group.length);});
   }
-  return centers;
+  return centers.filter((center,index)=>index===0 || (groups[index].length>=3 && colorDistance(center,seedColor)<=42));
 }
 
 function convexHull(source) {
@@ -205,9 +207,11 @@ function magicSelect(point) {
     let selection;
     try {
       const stagePoint=svgToStage(point);
-      for(const tolerance of [25,31,37,43]) {
+      for(const tolerance of [16,22,28,34,40]) {
         const candidate=traceConnectedColor(stagePoint.x,stagePoint.y,tolerance);
-        if(candidate)selection=candidate;
+        if(!candidate)continue;
+        if(selection && candidate.count>selection.count*1.65)break;
+        selection=candidate;
       }
     }
     catch { selection=null; }
