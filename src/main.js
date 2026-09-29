@@ -99,6 +99,35 @@ function colorDistance(a, b) {
   return Math.sqrt(red*red*.3 + green*green*.59 + blue*blue*.11);
 }
 
+function sampleColorPalette(pixelAt, seedX, seedY, cols, rows) {
+  const samples=[];
+  for(let offsetY=-2;offsetY<=2;offsetY++) for(let offsetX=-2;offsetX<=2;offsetX++) {
+    if(offsetX*offsetX+offsetY*offsetY>5)continue;
+    const x=Math.max(0,Math.min(cols-1,seedX+offsetX)), y=Math.max(0,Math.min(rows-1,seedY+offsetY));
+    const color=pixelAt(x,y); if(color[3]>200)samples.push(color.slice(0,3));
+  }
+  if(!samples.length)return [];
+  const centers=[samples[Math.floor(samples.length/2)]];
+  while(centers.length<Math.min(4,samples.length)) {
+    const next=samples.reduce((best,color) => {
+      const distance=Math.min(...centers.map(center=>colorDistance(color,center)));
+      return distance>best.distance?{color,distance}:best;
+    },{color:samples[0],distance:-1}).color;
+    if(centers.some(center=>colorDistance(center,next)<6))break;
+    centers.push(next);
+  }
+  for(let iteration=0;iteration<5;iteration++) {
+    const groups=centers.map(()=>[]);
+    samples.forEach(color=>{
+      let closest=0;
+      centers.forEach((center,index)=>{if(colorDistance(color,center)<colorDistance(color,centers[closest]))closest=index;});
+      groups[closest].push(color);
+    });
+    groups.forEach((group,index)=>{if(group.length)centers[index]=[0,1,2].map(channel=>group.reduce((sum,color)=>sum+color[channel],0)/group.length);});
+  }
+  return centers;
+}
+
 function convexHull(source) {
   const sorted = [...source].sort((a,b) => a.x-b.x || a.y-b.y);
   if (sorted.length < 4) return sorted;
@@ -131,6 +160,8 @@ function traceConnectedColor(stageX, stageY, tolerance=34) {
   const seedY=Math.max(0,Math.min(rows-1,Math.floor(stageY/step)));
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
   const seed=pixelAt(seedX,seedY); if(seed[3]<200)return null;
+  const palette=sampleColorPalette(pixelAt,seedX,seedY,cols,rows); if(!palette.length)return null;
+  const matchesPalette=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
   const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
   const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=1;
   queueX[0]=seedX; queueY[0]=seedY; visited[seedY*cols+seedX]=1;
@@ -145,15 +176,16 @@ function traceConnectedColor(stageX, stageY, tolerance=34) {
     for(const [nextX,nextY] of neighbors) {
       if(nextX<0||nextY<0||nextX>=cols||nextY>=rows)continue;
       const nextIndex=nextY*cols+nextX;
-      if(!visited[nextIndex] && colorDistance(pixelAt(nextX,nextY),seed)<=tolerance){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
+      if(!visited[nextIndex] && matchesPalette(pixelAt(nextX,nextY))){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
     }
   }
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
-  if(count<35 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16) return null;
+  const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
+  if(count<35 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.28) return null;
   const boundary=[];
   for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(mask[y*cols+x] && (!mask[y*cols+x-1]||!mask[y*cols+x+1]||!mask[(y-1)*cols+x]||!mask[(y+1)*cols+x])) boundary.push({x:x*step,y:y*step});
   if(boundary.length<3)return null;
-  return {mask,cols,rows,step,count,boundary};
+  return {mask,cols,rows,step,count,boundary,palette};
 }
 
 function drawSelectionMask(selection) {
