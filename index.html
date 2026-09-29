@@ -26,49 +26,46 @@
       <aside class="side-panel">
         <div class="panel-top">
           <div class="eyebrow"><span class="status-dot"></span> New measurement</div>
-          <h1>Map the roof.<br><em>We’ll trace the rest.</em></h1>
-          <p class="intro">Search for a property, then tap a roof to create clean, editable roof lines automatically.</p>
+          <h1>Trace the roof.<br><em>We’ll find the edges.</em></h1>
+          <p class="intro">Search for a property, then touch the roof in the aerial image. Magic select finds similar surfaces to create an editable outline.</p>
 
           <form class="search-card" id="addressForm">
             <label for="address">Property address</label>
             <div class="search-row">
               <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
-              <input id="address" value="1847 Juniper Lane, Austin, TX" autocomplete="street-address" />
+              <input id="address" value="1227 West Cedar Canyons Road" autocomplete="street-address" />
               <button type="submit" aria-label="Find address">→</button>
             </div>
             <button type="button" class="google-link" id="googleLink"><span class="google-g">G</span> Open in Google Maps <span>↗</span></button>
             <div class="location-status visible" id="locationStatus" aria-live="polite">
               <span class="location-status-icon">✓</span>
-              <span><strong>Showing this address</strong><small id="locationAddress">1847 Juniper Lane, Austin, TX</small></span>
+              <span><strong>Showing this address</strong><small id="locationAddress">1227 West Cedar Canyons Road</small></span>
             </div>
           </form>
         </div>
 
         <div class="progress-card">
-          <div class="progress-heading"><span>Measurement progress</span><strong id="progressValue">72%</strong></div>
+          <div class="progress-heading"><span>Measurement progress</span><strong id="progressValue">0%</strong></div>
           <div class="progress-track"><i id="progressBar"></i></div>
           <div class="progress-stats">
-            <div><strong id="lineCount">8</strong><span>Roof lines</span></div>
-            <div><strong id="areaValue">2,486</strong><span>Area sq ft</span></div>
-            <div><strong id="vertexCount">7</strong><span>Vertices</span></div>
+            <div><strong id="lineCount">0</strong><span>Roof lines</span></div>
+            <div><strong id="areaValue">—</strong><span>Area sq ft</span></div>
+            <div><strong id="vertexCount">0</strong><span>Vertices</span></div>
           </div>
         </div>
       </aside>
 
       <section class="workspace" aria-label="Roof editor">
         <div class="map-stage" id="mapStage">
-          <div class="map-texture"></div>
+          <div class="tile-layer" id="tileLayer" aria-label="Aerial imagery"></div>
           <div class="searching-overlay" id="searchingOverlay" aria-hidden="true"><span></span><strong>Finding property…</strong></div>
-          <div class="street-label top">Juniper Lane</div>
-          <div class="street-label bottom">Cedar Crest Drive</div>
-          <div class="property p1"></div><div class="property p2"></div><div class="property p3"></div>
-          <div class="trees trees-a"></div><div class="trees trees-b"></div><div class="trees trees-c"></div>
           <div class="property-pin" id="propertyPin" aria-hidden="true"><span></span></div>
-          <div class="map-location" id="mapLocation"><span>●</span><div><small>CURRENT PROPERTY</small><strong>1847 Juniper Lane</strong></div></div>
+          <div class="map-location" id="mapLocation"><span>●</span><div><small>CURRENT PROPERTY</small><strong>1227 West Cedar Canyons Road</strong></div></div>
 
           <div class="map-toolbar top-tools">
-            <button class="active" data-tool="select" aria-label="Select tool">↖</button>
-            <button data-tool="pan" aria-label="Pan tool">✋</button>
+            <button class="active magic-tool" data-tool="magic" aria-label="Magic select tool" title="Magic select">✦</button>
+            <button data-tool="vertex" aria-label="Add vertex tool" title="Add vertex">＋</button>
+            <button data-tool="pan" aria-label="Pan tool" title="Pan">✋</button>
             <span></span>
             <button id="undoBtn" aria-label="Undo">↶</button>
             <button id="redoBtn" aria-label="Redo">↷</button>
@@ -82,34 +79,35 @@
             <defs>
               <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity=".24"/></filter>
             </defs>
-            <polygon class="roof-shadow" points="210,174 450,105 674,197 694,410 490,512 194,405" />
-            <polygon class="roof-fill" id="roofFill" points="210,174 450,105 674,197 694,410 490,512 194,405" />
+            <polygon class="roof-shadow" points="" />
+            <polygon class="roof-fill" id="roofFill" points="" />
             <g id="lineLayer"></g>
             <g id="vertexLayer"></g>
+            <g id="selectionPulse"></g>
           </svg>
 
           <div class="magic-tip" id="magicTip">
             <div class="spark">✦</div>
-            <div><strong>Smart trace complete</strong><span>Drag any point to fine-tune your roof.</span></div>
+            <div><strong>Touch the roof to magic select</strong><span>We’ll group similar-colored roof surfaces.</span></div>
             <button aria-label="Dismiss" id="dismissTip">×</button>
           </div>
 
-          <div class="map-footer"><span>Imagery © 2026</span><span>20 ft</span></div>
+          <div class="map-footer"><span>Source: Esri, Maxar, Earthstar Geographics</span><span>20 ft</span></div>
         </div>
 
         <div class="editor-panel">
           <div class="editor-heading">
-            <div><span class="step-label">STEP 2 OF 3</span><h2>Classify roof lines</h2></div>
+            <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
             <button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button>
           </div>
-          <p class="editor-help">Select a line on the map, then choose its type.</p>
+          <p class="editor-help" id="editorHelp">Choose magic select and touch a roof surface in the aerial image. Add or drag vertices to refine the result.</p>
           <div class="line-types" id="lineTypes">
             <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>34.2 ft selected</small></span><b>✓</b></button>
             <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>
             <button class="line-type" data-type="Hip"><i class="swatch hip"></i><span><strong>Hip</strong><small>Outside slope</small></span><b>H</b></button>
             <button class="line-type" data-type="Valley"><i class="swatch valley"></i><span><strong>Valley</strong><small>Inside slope</small></span><b>V</b></button>
             <button class="line-type" data-type="Rake"><i class="swatch rake"></i><span><strong>Rake</strong><small>Sloped edge</small></span><b>K</b></button>
-            <button class="add-line" id="addLineBtn"><span>＋</span><strong>Add roof line</strong><small>Tap two points</small></button>
+            <button class="add-line" id="addVertexBtn"><span>＋</span><strong>Add vertex</strong><small>Tap an edge</small></button>
           </div>
         </div>
       </section>
