@@ -37,6 +37,10 @@
               <button type="submit" aria-label="Find address">→</button>
             </div>
             <button type="button" class="google-link" id="googleLink"><span class="google-g">G</span> Open in Google Maps <span>↗</span></button>
+            <div class="location-status visible" id="locationStatus" aria-live="polite">
+              <span class="location-status-icon">✓</span>
+              <span><strong>Showing this address</strong><small id="locationAddress">1847 Juniper Lane, Austin, TX</small></span>
+            </div>
           </form>
         </div>
 
@@ -54,10 +58,13 @@
       <section class="workspace" aria-label="Roof editor">
         <div class="map-stage" id="mapStage">
           <div class="map-texture"></div>
+          <div class="searching-overlay" id="searchingOverlay" aria-hidden="true"><span></span><strong>Finding property…</strong></div>
           <div class="street-label top">Juniper Lane</div>
           <div class="street-label bottom">Cedar Crest Drive</div>
           <div class="property p1"></div><div class="property p2"></div><div class="property p3"></div>
           <div class="trees trees-a"></div><div class="trees trees-b"></div><div class="trees trees-c"></div>
+          <div class="property-pin" id="propertyPin" aria-hidden="true"><span></span></div>
+          <div class="map-location" id="mapLocation"><span>●</span><div><small>CURRENT PROPERTY</small><strong>1847 Juniper Lane</strong></div></div>
 
           <div class="map-toolbar top-tools">
             <button class="active" data-tool="select" aria-label="Select tool">↖</button>

@@ -10,6 +10,7 @@ const canvas = document.querySelector('#roofCanvas');
 const lineLayer = document.querySelector('#lineLayer');
 const vertexLayer = document.querySelector('#vertexLayer');
 const roofFill = document.querySelector('#roofFill');
+const defaultPoints = points.map(point => ({...point}));
 
 function svgEl(name, attrs={}) { const el=document.createElementNS('http://www.w3.org/2000/svg',name); Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,v)); return el; }
 function render(){
@@ -50,7 +51,44 @@ vertexLayer.addEventListener('click',e=>{
   if(vertexLayer.firstPick===undefined){vertexLayer.firstPick=index;toast('Now tap the ending vertex');}
   else if(index!==vertexLayer.firstPick){extraLines.push({a:vertexLayer.firstPick,b:index,type:'Ridge'});vertexLayer.firstPick=undefined;addingLine=false;selectedLine=points.length+extraLines.length-1;render();toast('New roof line added');}
 });
-document.querySelector('#addressForm').addEventListener('submit',e=>{e.preventDefault();document.querySelector('#magicTip').classList.remove('hidden');toast('Property located — tap the roof to trace');});
+function hashAddress(value) {
+  return [...value].reduce((hash, character) => ((hash << 5) - hash + character.charCodeAt(0)) | 0, 0);
+}
+function propertyName(address) { return address.split(',')[0].trim() || address; }
+function showProperty(address) {
+  const hash = Math.abs(hashAddress(address));
+  const xShift = (hash % 61) - 30;
+  const yShift = (Math.floor(hash / 61) % 35) - 17;
+  const scale = .9 + (hash % 18) / 100;
+  points.forEach((point, index) => {
+    point.x = 450 + (defaultPoints[index].x - 450) * scale + xShift;
+    point.y = 325 + (defaultPoints[index].y - 325) * scale + yShift;
+  });
+  document.querySelector('#mapStage').style.setProperty('--location-hue', `${(hash % 31) - 15}deg`);
+  document.querySelector('#locationAddress').textContent = address;
+  document.querySelector('#mapLocation strong').textContent = propertyName(address);
+  document.querySelector('.street-label.top').textContent = propertyName(address);
+  document.querySelector('#locationStatus').classList.add('visible');
+  document.querySelector('#magicTip').classList.remove('hidden');
+  render();
+}
+document.querySelector('#addressForm').addEventListener('submit',e=>{
+  e.preventDefault();
+  const input = document.querySelector('#address');
+  const address = input.value.trim();
+  if (!address) { input.focus(); toast('Enter a property address first'); return; }
+  const overlay = document.querySelector('#searchingOverlay');
+  const submit = e.currentTarget.querySelector('[type="submit"]');
+  overlay.classList.add('visible');
+  submit.disabled = true;
+  document.querySelector('#locationStatus').classList.remove('visible');
+  window.setTimeout(() => {
+    showProperty(address);
+    overlay.classList.remove('visible');
+    submit.disabled = false;
+    toast('Property centered — review the outlined roof');
+  }, 650);
+});
 document.querySelector('#googleLink').addEventListener('click',()=>window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(document.querySelector('#address').value)}`,'_blank','noopener'));
 document.querySelector('#shareBtn').addEventListener('click',async()=>{const data={title:'Roofline measurement',text:'Review this roof measurement',url:location.href};if(navigator.share)await navigator.share(data);else{await navigator.clipboard?.writeText(location.href);toast('Share link copied');}});
 document.querySelector('#finishBtn').addEventListener('click',()=>{document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
