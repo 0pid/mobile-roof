@@ -101,35 +101,13 @@ function colorDistance(a, b) {
   return Math.sqrt(red*red*.3 + green*green*.59 + blue*blue*.11);
 }
 
-function sampleColorPalette(pixelAt, seedX, seedY, cols, rows) {
+function samplePaintColor(pixelAt, seed, cols, rows) {
   const samples=[];
-  for(let offsetY=-2;offsetY<=2;offsetY++) for(let offsetX=-2;offsetX<=2;offsetX++) {
-    if(offsetX*offsetX+offsetY*offsetY>5)continue;
-    const x=Math.max(0,Math.min(cols-1,seedX+offsetX)), y=Math.max(0,Math.min(rows-1,seedY+offsetY));
-    const color=pixelAt(x,y); if(color[3]>200)samples.push(color.slice(0,3));
+  for(let offsetY=-1;offsetY<=1;offsetY++) for(let offsetX=-1;offsetX<=1;offsetX++) {
+    const color=pixelAt(Math.max(0,Math.min(cols-1,seed.x+offsetX)),Math.max(0,Math.min(rows-1,seed.y+offsetY)));
+    if(color[3]>200)samples.push(color);
   }
-  if(!samples.length)return [];
-  const seedColor=pixelAt(seedX,seedY).slice(0,3);
-  const centers=[seedColor];
-  while(centers.length<Math.min(4,samples.length)) {
-    const next=samples.reduce((best,color) => {
-      const distance=Math.min(...centers.map(center=>colorDistance(color,center)));
-      return distance>best.distance?{color,distance}:best;
-    },{color:samples[0],distance:-1}).color;
-    if(centers.some(center=>colorDistance(center,next)<6))break;
-    centers.push(next);
-  }
-  let groups=[];
-  for(let iteration=0;iteration<5;iteration++) {
-    groups=centers.map(()=>[]);
-    samples.forEach(color=>{
-      let closest=0;
-      centers.forEach((center,index)=>{if(colorDistance(color,center)<colorDistance(color,centers[closest]))closest=index;});
-      groups[closest].push(color);
-    });
-    groups.forEach((group,index)=>{if(group.length)centers[index]=[0,1,2].map(channel=>group.reduce((sum,color)=>sum+color[channel],0)/group.length);});
-  }
-  return centers.filter((center,index)=>index===0 || (groups[index].length>=3 && colorDistance(center,seedColor)<=42));
+  return [0,1,2].map(channel=>samples.reduce((sum,color)=>sum+color[channel],0)/samples.length);
 }
 
 function convexHull(source) {
@@ -158,18 +136,24 @@ function simplifyHull(hull, maximumPoints=12) {
 function radiateRoofBoundary(seeds, pixelAt, palette, cols, rows, tolerance) {
   const center=seeds.reduce((sum,seed)=>({x:sum.x+seed.x/seeds.length,y:sum.y+seed.y/seeds.length}),{x:0,y:0});
   const matches=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
-  const boundary=[], rayCount=48, maximumTravel=Math.ceil(Math.min(cols,rows)*.24);
+  const strokeWidth=Math.max(...seeds.map(seed=>seed.x))-Math.min(...seeds.map(seed=>seed.x));
+  const strokeHeight=Math.max(...seeds.map(seed=>seed.y))-Math.min(...seeds.map(seed=>seed.y));
+  const maximumTravel=Math.max(8,Math.min(32,Math.ceil(Math.max(strokeWidth,strokeHeight)*.65+6)));
+  const boundary=[], rayCount=48;
   for(let ray=0;ray<rayCount;ray++) {
     const angle=ray/rayCount*Math.PI*2, direction={x:Math.cos(angle),y:Math.sin(angle)};
     const origin=seeds.reduce((furthest,seed)=>{
       const projection=(seed.x-center.x)*direction.x+(seed.y-center.y)*direction.y;
       return projection>furthest.projection?{seed,projection}:furthest;
     },{seed:seeds[0],projection:-Infinity}).seed;
-    let lastInside={x:origin.x,y:origin.y}, mismatchStart=null, mismatches=0;
+    let lastInside={x:origin.x,y:origin.y}, mismatchStart=null, mismatches=0, previous=pixelAt(origin.x,origin.y), edgeStreak=0;
     for(let distance=1;distance<=maximumTravel;distance++) {
       const x=Math.round(origin.x+direction.x*distance), y=Math.round(origin.y+direction.y*distance);
       if(x<1||y<1||x>=cols-1||y>=rows-1)break;
-      if(matches(pixelAt(x,y))) { lastInside={x,y}; mismatchStart=null; mismatches=0; }
+      const color=pixelAt(x,y), edgeStrength=colorDistance(color,previous); previous=color;
+      edgeStreak=edgeStrength>26?edgeStreak+1:0;
+      if(distance>2 && edgeStreak>=2)break;
+      if(matches(color)) { lastInside={x,y}; mismatchStart=null; mismatches=0; }
       else {
         if(!mismatchStart)mismatchStart={x:lastInside.x,y:lastInside.y};
         mismatches++;
@@ -190,9 +174,10 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
   if(seeds.some(seed=>pixelAt(seed.x,seed.y)[3]<200))return null;
   const palette=[];
-  seeds.forEach(seed=>sampleColorPalette(pixelAt,seed.x,seed.y,cols,rows).forEach(color=>{
-    if(palette.length<8 && !palette.some(existing=>colorDistance(existing,color)<9))palette.push(color);
-  }));
+  seeds.forEach(seed=>{
+    const color=samplePaintColor(pixelAt,seed,cols,rows);
+    if(palette.length<10 && !palette.some(existing=>colorDistance(existing,color)<7))palette.push(color);
+  });
   if(!palette.length)return null;
   const matchesPalette=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
   const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
