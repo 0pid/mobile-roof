@@ -33,7 +33,7 @@ function updateProgress() {
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
     ? 'Drag any point to adjust the outline, or add a vertex for more detail. Then select a line to classify it.'
-    : 'Choose magic select and touch a roof surface in the aerial image. Add or drag vertices to refine the result.';
+    : 'Choose the magic lasso and touch a roof surface in the aerial image. Add or drag vertices to refine the result.';
 }
 
 function render() {
@@ -110,7 +110,7 @@ function simplifyHull(hull, maximumPoints=12) {
   return result;
 }
 
-function traceConnectedColor(stageX, stageY, tolerance=47) {
+function traceConnectedColor(stageX, stageY, tolerance=34) {
   const width=imageryCanvas.width, height=imageryCanvas.height;
   if (!width || !height) return null;
   const source=imageryCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,width,height).data;
@@ -122,21 +122,25 @@ function traceConnectedColor(stageX, stageY, tolerance=47) {
   const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
   const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=1;
   queueX[0]=seedX; queueY[0]=seedY; visited[seedY*cols+seedX]=1;
-  const boundary=[]; let count=0;
-  while(head<tail && count<cols*rows*.38) {
+  let count=0, minX=seedX, maxX=seedX, minY=seedY, maxY=seedY;
+  const maximumPixels=Math.floor(cols*rows*.12);
+  while(head<tail) {
     const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
-    if(colorDistance(current,seed)>tolerance) continue;
     mask[index]=1; count++;
+    minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y);
+    if(count>maximumPixels)return null;
     const neighbors=[[x+1,y],[x-1,y],[x,y+1],[x,y-1]];
     for(const [nextX,nextY] of neighbors) {
-      if(nextX<0||nextY<0||nextX>=cols||nextY>=rows){boundary.push({x:x*step,y:y*step});continue;}
+      if(nextX<0||nextY<0||nextX>=cols||nextY>=rows)continue;
       const nextIndex=nextY*cols+nextX;
-      if(!visited[nextIndex] && colorDistance(pixelAt(nextX,nextY),current)<34){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
-      if(visited[nextIndex] && !mask[nextIndex]) boundary.push({x:x*step,y:y*step});
+      if(!visited[nextIndex] && colorDistance(pixelAt(nextX,nextY),seed)<=tolerance){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
     }
   }
-  if(count<35 || count>=cols*rows*.38) return null;
+  const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
+  if(count<35 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16) return null;
+  const boundary=[];
   for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) if(mask[y*cols+x] && (!mask[y*cols+x-1]||!mask[y*cols+x+1]||!mask[(y-1)*cols+x]||!mask[(y+1)*cols+x])) boundary.push({x:x*step,y:y*step});
+  if(boundary.length<3)return null;
   return {mask,cols,rows,step,count,boundary};
 }
 
@@ -156,13 +160,19 @@ function magicSelect(point) {
   window.setTimeout(() => {
     const stage=document.querySelector('#mapStage');
     let selection;
-    try { selection=traceConnectedColor(point.x/900*stage.clientWidth,point.y/650*stage.clientHeight); }
+    try {
+      const stageX=point.x/900*stage.clientWidth, stageY=point.y/650*stage.clientHeight;
+      for(const tolerance of [25,31,37,43]) {
+        const candidate=traceConnectedColor(stageX,stageY,tolerance);
+        if(candidate)selection=candidate;
+      }
+    }
     catch { selection=null; }
     if(!selection) {
       pulse.innerHTML='';
       document.querySelector('#magicTip strong').textContent='No clear roof plane found';
-      document.querySelector('#magicTip span').textContent='Try a more uniform area near the center of the roof.';
-      toast('Could not isolate that color — try another roof area'); return;
+      document.querySelector('#magicTip span').textContent='Tap directly on a roof plane—not the surrounding lawn or road.';
+      toast('That color covers too much of the image — tap the roof itself'); return;
     }
     const hull=simplifyHull(convexHull(selection.boundary));
     points=hull.map(vertex=>({x:vertex.x/stage.clientWidth*900,y:vertex.y/stage.clientHeight*650}));
