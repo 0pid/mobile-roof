@@ -123,6 +123,20 @@ function samplePaintColor(pixelAt, seed, cols, rows) {
   return [0,1,2].map(channel=>samples.reduce((sum,color)=>sum+color[channel],0)/samples.length);
 }
 
+function chooseRepresentativeColors(colors, maximum=10) {
+  if(colors.length<=maximum)return colors;
+  const selected=[colors[0]];
+  while(selected.length<maximum) {
+    const next=colors.reduce((best,color)=>{
+      const distance=Math.min(...selected.map(sample=>colorDistance(color,sample)));
+      return distance>best.distance?{color,distance}:best;
+    },{color:colors[0],distance:-1});
+    if(next.distance<7)break;
+    selected.push(next.color);
+  }
+  return selected;
+}
+
 function simplifyHull(hull, maximumPoints=12) {
   const result=[...hull];
   while(result.length>maximumPoints) {
@@ -184,18 +198,16 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const seeds=stagePoints.map(point=>({x:Math.max(0,Math.min(cols-1,Math.floor(point.x/step))),y:Math.max(0,Math.min(rows-1,Math.floor(point.y/step)))}));
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
   if(seeds.some(seed=>pixelAt(seed.x,seed.y)[3]<200))return null;
-  const palette=[];
-  seeds.forEach(seed=>{
-    const color=samplePaintColor(pixelAt,seed,cols,rows);
-    if(palette.length<10 && !palette.some(existing=>colorDistance(existing,color)<7))palette.push(color);
-  });
+  const paintedColors=seeds.map(seed=>samplePaintColor(pixelAt,seed,cols,rows));
+  const palette=chooseRepresentativeColors(paintedColors);
   if(!palette.length)return null;
   const matchesPalette=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
   const visited=new Uint8Array(cols*rows), mask=new Uint8Array(cols*rows);
   const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=0;
   seeds.forEach(seed=>{const index=seed.y*cols+seed.x;if(!visited[index]){visited[index]=1;queueX[tail]=seed.x;queueY[tail++]=seed.y;}});
-  let count=0, minX=seeds[0].x, maxX=seeds[0].x, minY=seeds[0].y, maxY=seeds[0].y;
-  const maximumPixels=Math.floor(cols*rows*.12);
+  let count=0, minX=Math.min(...seeds.map(seed=>seed.x)), maxX=Math.max(...seeds.map(seed=>seed.x)), minY=Math.min(...seeds.map(seed=>seed.y)), maxY=Math.max(...seeds.map(seed=>seed.y));
+  const paintedBoxArea=(maxX-minX+1)*(maxY-minY+1);
+  const maximumPixels=Math.floor(Math.min(cols*rows*.4,Math.max(cols*rows*.12,paintedBoxArea*3)));
   while(head<tail) {
     const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
     mask[index]=1; count++;
@@ -212,7 +224,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   if(count>maximumPixels)return null;
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
   const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
-  if(count<8 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.2) return null;
+  if(count<8 || boxWidth>.7 || boxHeight>.7 || boxWidth*boxHeight>.4 || compactness<.16) return null;
   const boundary=extractMaskContour(mask,cols,rows,step);
   if(boundary.length<3)return null;
   return {mask,cols,rows,step,count,boundary,palette};
@@ -245,9 +257,9 @@ function magicSelect(stroke) {
     catch { selection=null; }
     if(!selection) {
       pulse.innerHTML='';
-      document.querySelector('#magicTip strong').textContent='Add a little more roof detail';
-      document.querySelector('#magicTip span').textContent='Paint a longer stroke inside the roof, including a light and dark section.';
-      toast('Not enough roof detail yet — paint a slightly longer stroke'); return;
+      document.querySelector('#magicTip strong').textContent='Couldn’t isolate one roof plane';
+      document.querySelector('#magicTip span').textContent='Keep the stroke inside a single roof and avoid crossing into the yard.';
+      toast('Roof selection spread outside one plane — try a tighter stroke'); return;
     }
     const outline=simplifyHull(selection.boundary,12);
     points=outline.map(stageToSvg);
