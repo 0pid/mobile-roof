@@ -135,38 +135,6 @@ function simplifyHull(hull, maximumPoints=12) {
   return result;
 }
 
-function radiateRoofBoundary(seeds, pixelAt, palette, cols, rows, tolerance) {
-  const center=seeds.reduce((sum,seed)=>({x:sum.x+seed.x/seeds.length,y:sum.y+seed.y/seeds.length}),{x:0,y:0});
-  const matches=color=>Math.min(...palette.map(sample=>colorDistance(color,sample)))<=tolerance;
-  const strokeWidth=Math.max(...seeds.map(seed=>seed.x))-Math.min(...seeds.map(seed=>seed.x));
-  const strokeHeight=Math.max(...seeds.map(seed=>seed.y))-Math.min(...seeds.map(seed=>seed.y));
-  const maximumTravel=Math.max(8,Math.min(32,Math.ceil(Math.max(strokeWidth,strokeHeight)*.65+6)));
-  const boundary=[], rayCount=48;
-  for(let ray=0;ray<rayCount;ray++) {
-    const angle=ray/rayCount*Math.PI*2, direction={x:Math.cos(angle),y:Math.sin(angle)};
-    const origin=seeds.reduce((furthest,seed)=>{
-      const projection=(seed.x-center.x)*direction.x+(seed.y-center.y)*direction.y;
-      return projection>furthest.projection?{seed,projection}:furthest;
-    },{seed:seeds[0],projection:-Infinity}).seed;
-    let lastInside={x:origin.x,y:origin.y}, mismatchStart=null, mismatches=0, previous=pixelAt(origin.x,origin.y), edgeStreak=0;
-    for(let distance=1;distance<=maximumTravel;distance++) {
-      const x=Math.round(origin.x+direction.x*distance), y=Math.round(origin.y+direction.y*distance);
-      if(x<1||y<1||x>=cols-1||y>=rows-1)break;
-      const color=pixelAt(x,y), edgeStrength=colorDistance(color,previous); previous=color;
-      edgeStreak=edgeStrength>26?edgeStreak+1:0;
-      if(distance>2 && edgeStreak>=2)break;
-      if(matches(color)) { lastInside={x,y}; mismatchStart=null; mismatches=0; }
-      else {
-        if(!mismatchStart)mismatchStart={x:lastInside.x,y:lastInside.y};
-        mismatches++;
-        if(mismatches>=3)break;
-      }
-    }
-    boundary.push(mismatchStart||lastInside);
-  }
-  return boundary;
-}
-
 function tracePaintedRegion(stagePoints, tolerance=34) {
   const width=imageryCanvas.width, height=imageryCanvas.height;
   if (!width || !height || !stagePoints.length) return null;
@@ -202,7 +170,11 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
   const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
   if(count<8 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.2) return null;
-  const boundary=radiateRoofBoundary(seeds,pixelAt,palette,cols,rows,tolerance).map(point=>({x:point.x*step,y:point.y*step}));
+  const boundary=[];
+  for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) {
+    const index=y*cols+x;
+    if(mask[index] && (!mask[index-1]||!mask[index+1]||!mask[index-cols]||!mask[index+cols])) boundary.push({x:x*step,y:y*step});
+  }
   if(boundary.length<3)return null;
   return {mask,cols,rows,step,count,boundary,palette};
 }
@@ -219,7 +191,7 @@ function magicSelect(stroke) {
   const pulse = document.querySelector('#selectionPulse');
   pulse.innerHTML = `<polyline class="paint-stroke processing" points="${stroke.map(point=>`${point.x},${point.y}`).join(' ')}"/>`;
   document.querySelector('#magicTip strong').textContent = 'Finding matching roof pixels…';
-  document.querySelector('#magicTip span').textContent = 'Expanding your samples outward to find the roof border';
+  document.querySelector('#magicTip span').textContent = 'Fitting straight borders to the highlighted roof region';
   window.setTimeout(() => {
     let selection;
     try {
@@ -238,7 +210,7 @@ function magicSelect(stroke) {
       document.querySelector('#magicTip span').textContent='Paint a longer stroke inside the roof, including a light and dark section.';
       toast('Not enough roof detail yet — paint a slightly longer stroke'); return;
     }
-    const hull=simplifyHull(convexHull(selection.boundary),8);
+    const hull=simplifyHull(convexHull(selection.boundary),6);
     points=hull.map(stageToSvg);
     extraLines = [];
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
