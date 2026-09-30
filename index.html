@@ -23,7 +23,8 @@
     </header>
 
     <main class="app-shell">
-      <aside class="side-panel">
+      <aside class="side-panel" id="sidePanel">
+        <button class="panel-toggle" id="panelToggle" type="button" aria-expanded="true" aria-controls="sidePanel"><span>⌕</span><b>Property</b></button>
         <div class="panel-top">
           <div class="eyebrow"><span class="status-dot"></span> New measurement</div>
           <h1>Trace the roof.<br><em>We’ll find the edges.</em></h1>
@@ -98,7 +99,8 @@
           <div class="map-footer"><span>Source: Esri, Maxar, Earthstar Geographics</span><span>20 ft</span></div>
         </div>
 
-        <div class="editor-panel">
+        <div class="editor-panel" id="editorPanel">
+          <button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="editorPanel"><i></i><span>Roof tools &amp; steps</span><b>⌃</b></button>
           <div class="editor-heading">
             <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
             <button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button>
