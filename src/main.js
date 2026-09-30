@@ -294,24 +294,25 @@ function yToLat(y,z){ return Math.atan(Math.sinh(Math.PI*(1-2*y/2**z)))*180/Math
 function renderTiles(){
   const layer=document.querySelector('#tileLayer'); layer.innerHTML='';
   loadedTiles.length=0; const renderId=++tileRenderId;
-  const centerX=lonToX(mapCenter.lon,mapZoom); const centerY=latToY(mapCenter.lat,mapZoom);
+  const sourceZoom=Math.min(mapZoom,20), overzoomScale=2**(mapZoom-sourceZoom), tileSize=256*overzoomScale;
+  const centerX=lonToX(mapCenter.lon,sourceZoom); const centerY=latToY(mapCenter.lat,sourceZoom);
   const stage=document.querySelector('#mapStage'); const width=stage.clientWidth||900; const height=stage.clientHeight||650;
   imageryCanvas.width=width; imageryCanvas.height=height;
-  const startX=Math.floor(centerX-width/512)-1; const endX=Math.ceil(centerX+width/512)+1;
-  const startY=Math.floor(centerY-height/512)-1; const endY=Math.ceil(centerY+height/512)+1;
+  const startX=Math.floor(centerX-width/(tileSize*2))-1; const endX=Math.ceil(centerX+width/(tileSize*2))+1;
+  const startY=Math.floor(centerY-height/(tileSize*2))-1; const endY=Math.ceil(centerY+height/(tileSize*2))+1;
   for(let x=startX;x<=endX;x++) for(let y=startY;y<=endY;y++){
     const image=new Image(); image.alt=''; image.draggable=false;
     image.crossOrigin='anonymous';
-    const left=width/2+(x-centerX)*256, top=height/2+(y-centerY)*256;
-    image.style.left=`${left}px`; image.style.top=`${top}px`;
+    const left=width/2+(x-centerX)*tileSize, top=height/2+(y-centerY)*tileSize;
+    image.style.left=`${left}px`; image.style.top=`${top}px`; image.style.width=`${tileSize}px`; image.style.height=`${tileSize}px`;
     image.addEventListener('load',()=>{
       if(renderId!==tileRenderId)return;
-      loadedTiles.push({image,left,top});
+      loadedTiles.push({image,left,top,size:tileSize});
       const context=imageryCanvas.getContext('2d',{willReadFrequently:true});
       context.clearRect(0,0,width,height);
-      loadedTiles.forEach(tile=>context.drawImage(tile.image,tile.left,tile.top,256,256));
+      loadedTiles.forEach(tile=>context.drawImage(tile.image,tile.left,tile.top,tile.size,tile.size));
     });
-    image.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${mapZoom}/${y}/${x}`;
+    image.src=`https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${sourceZoom}/${y}/${x}`;
     layer.append(image);
   }
 }
@@ -326,13 +327,13 @@ function clearRoofSelection(activateMagic=true) {
 }
 
 function updateZoom(delta) {
-  const nextZoom=Math.max(18,Math.min(21,mapZoom+delta));
+  const nextZoom=Math.max(18,Math.min(22,mapZoom+delta));
   if(nextZoom===mapZoom){toast(delta>0?'Maximum imagery detail reached':'Minimum imagery detail reached');return;}
   mapZoom=nextZoom; clearRoofSelection(); renderTiles();
   document.querySelector('#zoomLevel').textContent=mapZoom;
-  document.querySelector('#zoomIn').disabled=mapZoom===21;
+  document.querySelector('#zoomIn').disabled=mapZoom===22;
   document.querySelector('#zoomOut').disabled=mapZoom===18;
-  toast(`Zoom ${mapZoom} — paint the roof again at this detail`);
+  toast(`Zoom ${mapZoom}${mapZoom>20?' enhanced':''} — paint the roof again at this scale`);
 }
 
 function propertyName(address) { return address.split(',')[0].trim() || address; }
