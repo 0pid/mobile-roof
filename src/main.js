@@ -6,6 +6,7 @@ let activeTool = 'magic';
 let painting = false;
 let paintPoints = [];
 let panGesture = null;
+let polygonVisible = true;
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
 let tileRenderId = 0;
@@ -112,15 +113,6 @@ function samplePaintColor(pixelAt, seed, cols, rows) {
   return [0,1,2].map(channel=>samples.reduce((sum,color)=>sum+color[channel],0)/samples.length);
 }
 
-function convexHull(source) {
-  const sorted = [...source].sort((a,b) => a.x-b.x || a.y-b.y);
-  if (sorted.length < 4) return sorted;
-  const cross = (origin,a,b) => (a.x-origin.x)*(b.y-origin.y)-(a.y-origin.y)*(b.x-origin.x);
-  const lower=[]; for (const point of sorted) { while(lower.length>1 && cross(lower.at(-2),lower.at(-1),point)<=0) lower.pop(); lower.push(point); }
-  const upper=[]; for (const point of sorted.reverse()) { while(upper.length>1 && cross(upper.at(-2),upper.at(-1),point)<=0) upper.pop(); upper.push(point); }
-  lower.pop(); upper.pop(); return lower.concat(upper);
-}
-
 function simplifyHull(hull, maximumPoints=12) {
   const result=[...hull];
   while(result.length>maximumPoints) {
@@ -133,6 +125,31 @@ function simplifyHull(hull, maximumPoints=12) {
     result.splice(removeAt,1);
   }
   return result;
+}
+
+function extractMaskContour(mask, cols, rows, step) {
+  const edges=[];
+  const add=(x1,y1,x2,y2)=>edges.push({from:`${x1},${y1}`,to:`${x2},${y2}`,point:{x:x1*step,y:y1*step}});
+  for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) if(mask[y*cols+x]) {
+    if(y===0||!mask[(y-1)*cols+x])add(x,y,x+1,y);
+    if(x===cols-1||!mask[y*cols+x+1])add(x+1,y,x+1,y+1);
+    if(y===rows-1||!mask[(y+1)*cols+x])add(x+1,y+1,x,y+1);
+    if(x===0||!mask[y*cols+x-1])add(x,y+1,x,y);
+  }
+  const outgoing=new Map();
+  edges.forEach((edge,index)=>{if(!outgoing.has(edge.from))outgoing.set(edge.from,[]);outgoing.get(edge.from).push(index);});
+  const used=new Uint8Array(edges.length), loops=[];
+  edges.forEach((edge,startIndex)=>{
+    if(used[startIndex])return;
+    const loop=[]; let index=startIndex;
+    while(index!==undefined&&!used[index]) {
+      const current=edges[index]; used[index]=1; loop.push(current.point);
+      index=(outgoing.get(current.to)||[]).find(candidate=>!used[candidate]);
+    }
+    if(loop.length>3)loops.push(loop);
+  });
+  const area=loop=>Math.abs(loop.reduce((sum,point,index)=>{const next=loop[(index+1)%loop.length];return sum+point.x*next.y-next.x*point.y;},0));
+  return loops.sort((a,b)=>area(b)-area(a))[0]||[];
 }
 
 function tracePaintedRegion(stagePoints, tolerance=34) {
@@ -170,11 +187,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
   const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
   if(count<8 || boxWidth>.48 || boxHeight>.48 || boxWidth*boxHeight>.16 || compactness<.2) return null;
-  const boundary=[];
-  for(let y=1;y<rows-1;y++) for(let x=1;x<cols-1;x++) {
-    const index=y*cols+x;
-    if(mask[index] && (!mask[index-1]||!mask[index+1]||!mask[index-cols]||!mask[index+cols])) boundary.push({x:x*step,y:y*step});
-  }
+  const boundary=extractMaskContour(mask,cols,rows,step);
   if(boundary.length<3)return null;
   return {mask,cols,rows,step,count,boundary,palette};
 }
@@ -210,8 +223,8 @@ function magicSelect(stroke) {
       document.querySelector('#magicTip span').textContent='Paint a longer stroke inside the roof, including a light and dark section.';
       toast('Not enough roof detail yet — paint a slightly longer stroke'); return;
     }
-    const hull=simplifyHull(convexHull(selection.boundary),6);
-    points=hull.map(stageToSvg);
+    const outline=simplifyHull(selection.boundary,12);
+    points=outline.map(stageToSvg);
     extraLines = [];
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
     selectedAreaSquareFeet=selection.count*selection.step**2*metersPerPixel**2*10.7639;
@@ -307,6 +320,8 @@ function clearRoofSelection(activateMagic=true) {
   points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
   selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
   document.querySelector('#selectionPulse').innerHTML='';
+  polygonVisible=true; canvas.classList.remove('outline-hidden');
+  const toggle=document.querySelector('#togglePolygon'); toggle.textContent='◉'; toggle.setAttribute('aria-pressed','true'); toggle.setAttribute('aria-label','Hide roof polygon');
   if(activateMagic)setTool('magic'); render();
 }
 
@@ -342,6 +357,13 @@ document.querySelector('#shareBtn').addEventListener('click',async()=>{const dat
 document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
 document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
+document.querySelector('#togglePolygon').addEventListener('click',event=>{
+  if(!points.length){toast('Trace a roof before toggling its polygon');return;}
+  polygonVisible=!polygonVisible; canvas.classList.toggle('outline-hidden',!polygonVisible);
+  event.currentTarget.textContent=polygonVisible?'◉':'○'; event.currentTarget.setAttribute('aria-pressed',String(polygonVisible));
+  event.currentTarget.setAttribute('aria-label',polygonVisible?'Hide roof polygon':'Show roof polygon');
+  toast(polygonVisible?'Roof polygon shown':'Roof polygon hidden — selection mask visible');
+});
 document.querySelector('#zoomIn').addEventListener('click',()=>updateZoom(1));
 document.querySelector('#zoomOut').addEventListener('click',()=>updateZoom(-1));
 document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{setTool(button.dataset.tool);toast(`${button.dataset.tool==='magic'?'Magic lasso':button.dataset.tool==='vertex'?'Add vertex':'Pan'} tool active`);}));
