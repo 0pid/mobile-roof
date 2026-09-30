@@ -1,4 +1,5 @@
 let points = [];
+let additionalPlanes = [];
 let extraLines = [];
 let selectedLine = -1;
 let dragging = null;
@@ -17,6 +18,7 @@ const canvas = document.querySelector('#roofCanvas');
 const lineLayer = document.querySelector('#lineLayer');
 const vertexLayer = document.querySelector('#vertexLayer');
 const roofFill = document.querySelector('#roofFill');
+const planeLayer = document.querySelector('#planeLayer');
 const selectionMask = document.querySelector('#selectionMask');
 const imageryCanvas = document.createElement('canvas');
 
@@ -46,6 +48,16 @@ function render() {
   document.querySelector('.roof-shadow').setAttribute('points', pointString);
   lineLayer.innerHTML = '';
   vertexLayer.innerHTML = '';
+  planeLayer.innerHTML = '';
+  additionalPlanes.forEach((plane,index)=>{
+    const polygon=svgEl('polygon',{points:plane.points.map(point=>`${point.x},${point.y}`).join(' '),class:'detected-plane'});
+    polygon.style.opacity=String(.35+plane.confidence*.45);
+    polygon.addEventListener('pointerdown',event=>{
+      event.stopPropagation();
+      additionalPlanes[index]={points:[...points],confidence:1}; points=plane.points; selectedLine=-1; render(); toast('Roof plane selected for editing');
+    });
+    planeLayer.append(polygon);
+  });
   const lines = points.length > 2
     ? points.map((_,index) => ({a:index,b:(index+1)%points.length,type:'Eave'})).concat(extraLines)
     : [];
@@ -151,7 +163,7 @@ function simplifyHull(hull, maximumPoints=12) {
   return result;
 }
 
-function extractMaskContour(mask, cols, rows, step) {
+function extractMaskContours(mask, cols, rows, step) {
   const edges=[];
   const add=(x1,y1,x2,y2)=>edges.push({from:`${x1},${y1}`,to:`${x2},${y2}`,point:{x:x1*step,y:y1*step}});
   for(let y=0;y<rows;y++) for(let x=0;x<cols;x++) if(mask[y*cols+x]) {
@@ -173,7 +185,7 @@ function extractMaskContour(mask, cols, rows, step) {
     if(loop.length>3)loops.push(loop);
   });
   const area=loop=>Math.abs(loop.reduce((sum,point,index)=>{const next=loop[(index+1)%loop.length];return sum+point.x*next.y-next.x*point.y;},0));
-  return loops.sort((a,b)=>area(b)-area(a))[0]||[];
+  return loops.filter(loop=>area(loop)>step*step*6).sort((a,b)=>area(b)-area(a));
 }
 
 function fillEnclosedMaskAreas(mask, cols, rows) {
@@ -212,7 +224,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
     const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
     mask[index]=1; count++;
     minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y);
-    if(count>maximumPixels)return null;
+    if(count>maximumPixels)break;
     const neighbors=[[x+1,y],[x-1,y],[x,y+1],[x,y-1]];
     for(const [nextX,nextY] of neighbors) {
       if(nextX<0||nextY<0||nextX>=cols||nextY>=rows)continue;
@@ -221,13 +233,20 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
     }
   }
   count+=fillEnclosedMaskAreas(mask,cols,rows);
-  if(count>maximumPixels)return null;
-  const boxWidth=(maxX-minX+1)/cols, boxHeight=(maxY-minY+1)/rows;
-  const boxPixelArea=(maxX-minX+1)*(maxY-minY+1), compactness=count/boxPixelArea;
-  if(count<8 || boxWidth>.7 || boxHeight>.7 || boxWidth*boxHeight>.4 || compactness<.16) return null;
-  const boundary=extractMaskContour(mask,cols,rows,step);
-  if(boundary.length<3)return null;
-  return {mask,cols,rows,step,count,boundary,palette};
+  count=Math.min(count,maximumPixels);
+  const boundaries=extractMaskContours(mask,cols,rows,step);
+  if(!boundaries.length)return null;
+  const seedPixels=seeds.map(seed=>({x:seed.x*step,y:seed.y*step}));
+  const diagonal=Math.hypot(cols*step,rows*step);
+  const planes=boundaries.map(boundary=>{
+    const relevantSeeds=seedPixels.filter(seed=>{
+      let inside=false; for(let i=0,j=boundary.length-1;i<boundary.length;j=i++)if(((boundary[i].y>seed.y)!==(boundary[j].y>seed.y))&&(seed.x<(boundary[j].x-boundary[i].x)*(seed.y-boundary[i].y)/(boundary[j].y-boundary[i].y)+boundary[i].x))inside=!inside; return inside;
+    });
+    const samples=relevantSeeds.length?relevantSeeds:seedPixels;
+    const averageDistance=samples.reduce((sum,seed)=>sum+Math.min(...boundary.map(edge=>Math.hypot(edge.x-seed.x,edge.y-seed.y))),0)/samples.length;
+    return {boundary,confidence:Math.max(.2,Math.min(1,1-averageDistance/(diagonal*.18)))};
+  });
+  return {mask,cols,rows,step,count,planes,palette};
 }
 
 function drawSelectionMask(selection) {
@@ -250,19 +269,24 @@ function magicSelect(stroke) {
       for(const tolerance of [8,12,16,22,28]) {
         const candidate=tracePaintedRegion(stagePoints,tolerance);
         if(!candidate)continue;
-        if(selection && candidate.count>selection.count*1.65)break;
         selection=candidate;
       }
     }
     catch { selection=null; }
     if(!selection) {
       pulse.innerHTML='';
-      document.querySelector('#magicTip strong').textContent='Couldn’t isolate one roof plane';
-      document.querySelector('#magicTip span').textContent='Keep the stroke inside a single roof and avoid crossing into the yard.';
-      toast('Roof selection spread outside one plane — try a tighter stroke'); return;
+      const stagePoints=stroke.map(svgToStage), padding=12;
+      const left=Math.min(...stagePoints.map(point=>point.x))-padding, right=Math.max(...stagePoints.map(point=>point.x))+padding;
+      const top=Math.min(...stagePoints.map(point=>point.y))-padding, bottom=Math.max(...stagePoints.map(point=>point.y))+padding;
+      points=[{x:left,y:top},{x:right,y:top},{x:right,y:bottom},{x:left,y:bottom}].map(stageToSvg);
+      additionalPlanes=[]; selectedLine=0; render();
+      document.querySelector('#magicTip strong').textContent='Low-confidence roof outline';
+      document.querySelector('#magicTip span').textContent='We kept your painted area and made it editable—adjust the border as needed.';
+      toast('Created an editable outline from the painted roof'); return;
     }
-    const outline=simplifyHull(selection.boundary,12);
-    points=outline.map(stageToSvg);
+    const detected=selection.planes.map(plane=>({points:simplifyHull(plane.boundary,12).map(stageToSvg),confidence:plane.confidence}));
+    points=detected[0].points;
+    additionalPlanes=detected.slice(1);
     extraLines = [];
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
     selectedAreaSquareFeet=selection.count*selection.step**2*metersPerPixel**2*10.7639;
@@ -270,7 +294,7 @@ function magicSelect(stroke) {
     selectedLine = 0;
     pulse.innerHTML = '';
     document.querySelector('#magicTip strong').textContent = 'Roof surface selected';
-    document.querySelector('#magicTip span').textContent = `${points.length} border corners found from your painted roof sample.`;
+    document.querySelector('#magicTip span').textContent = `${detected.length} roof plane${detected.length===1?'':'s'} found from your painted samples.`;
     render(); toast('Magic lasso traced the connected roof color');
   }, 700);
 }
@@ -356,7 +380,7 @@ function renderTiles(){
 }
 
 function clearRoofSelection(activateMagic=true) {
-  points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
+  points=[]; additionalPlanes=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
   selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
   document.querySelector('#selectionPulse').innerHTML='';
   polygonVisible=true; canvas.classList.remove('outline-hidden');
@@ -400,7 +424,7 @@ document.querySelector('#addressForm').addEventListener('submit',async event=>{
 document.querySelector('#googleLink').addEventListener('click',()=>window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(document.querySelector('#address').value)}`,'_blank','noopener'));
 document.querySelector('#shareBtn').addEventListener('click',async()=>{const data={title:'Roofline measurement',text:'Review this roof measurement',url:location.href};if(navigator.share)await navigator.share(data);else{await navigator.clipboard?.writeText(location.href);toast('Share link copied');}});
 document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
-document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
+document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];additionalPlanes=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
 document.querySelector('#togglePolygon').addEventListener('click',event=>{
   if(!points.length){toast('Trace a roof before toggling its polygon');return;}
