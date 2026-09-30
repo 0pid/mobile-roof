@@ -5,6 +5,7 @@ let dragging = null;
 let activeTool = 'magic';
 let painting = false;
 let paintPoints = [];
+let panGesture = null;
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
 let tileRenderId = 0;
@@ -94,6 +95,7 @@ function setTool(tool) {
   activeTool = tool;
   document.querySelectorAll('[data-tool]').forEach(button => button.classList.toggle('active',button.dataset.tool===tool));
   canvas.classList.toggle('adding-vertex', tool === 'vertex');
+  canvas.classList.toggle('pan-tool', tool === 'pan');
 }
 
 function colorDistance(a, b) {
@@ -257,18 +259,39 @@ function appendPaintPoint(event) {
   document.querySelector('#selectionPulse').innerHTML=`<polyline class="paint-stroke" points="${paintPoints.map(item=>`${item.x},${item.y}`).join(' ')}"/>`;
 }
 canvas.addEventListener('pointerdown', event => {
+  if(activeTool==='pan') {
+    event.preventDefault();
+    clearRoofSelection(false);
+    panGesture={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,centerX:lonToX(mapCenter.lon,mapZoom),centerY:latToY(mapCenter.lat,mapZoom)};
+    canvas.setPointerCapture(event.pointerId); canvas.classList.add('panning');
+    return;
+  }
   if(activeTool!=='magic' || points.length)return;
   event.preventDefault(); painting=true; paintPoints=[]; canvas.setPointerCapture(event.pointerId); appendPaintPoint(event);
   document.querySelector('#magicTip strong').textContent='Paint across the roof plane';
   document.querySelector('#magicTip span').textContent='Release when the roof surface is covered.';
 });
-canvas.addEventListener('pointermove', event=>{if(painting)appendPaintPoint(event);});
+canvas.addEventListener('pointermove', event=>{
+  if(panGesture && event.pointerId===panGesture.pointerId) {
+    const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
+    document.querySelector('#tileLayer').style.transform=`translate(${offsetX}px,${offsetY}px)`;
+    return;
+  }
+  if(painting)appendPaintPoint(event);
+});
 canvas.addEventListener('pointerup', event=>{
+  if(panGesture && event.pointerId===panGesture.pointerId) {
+    const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
+    mapCenter={lon:xToLon(panGesture.centerX-offsetX/256,mapZoom),lat:yToLat(panGesture.centerY-offsetY/256,mapZoom)};
+    panGesture=null; canvas.classList.remove('panning'); document.querySelector('#tileLayer').style.transform='';
+    if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+    renderTiles(); toast('Map repositioned'); return;
+  }
   if(!painting)return; appendPaintPoint(event); painting=false;
   if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
   magicSelect([...paintPoints]);
 });
-canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];document.querySelector('#selectionPulse').innerHTML='';});
+canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];panGesture=null;canvas.classList.remove('panning');document.querySelector('#tileLayer').style.transform='';document.querySelector('#selectionPulse').innerHTML='';});
 
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
@@ -281,6 +304,8 @@ document.querySelector('#addVertexBtn').addEventListener('click',()=>{ if(!point
 
 function lonToX(lon,z){ return (lon+180)/360*2**z; }
 function latToY(lat,z){ const rad=lat*Math.PI/180; return (1-Math.asinh(Math.tan(rad))/Math.PI)/2*2**z; }
+function xToLon(x,z){ return x/2**z*360-180; }
+function yToLat(y,z){ return Math.atan(Math.sinh(Math.PI*(1-2*y/2**z)))*180/Math.PI; }
 function renderTiles(){
   const layer=document.querySelector('#tileLayer'); layer.innerHTML='';
   loadedTiles.length=0; const renderId=++tileRenderId;
@@ -306,11 +331,11 @@ function renderTiles(){
   }
 }
 
-function clearRoofSelection() {
+function clearRoofSelection(activateMagic=true) {
   points=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
   selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
   document.querySelector('#selectionPulse').innerHTML='';
-  setTool('magic'); render();
+  if(activateMagic)setTool('magic'); render();
 }
 
 function updateZoom(delta) {
