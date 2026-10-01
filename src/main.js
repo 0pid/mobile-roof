@@ -3,6 +3,7 @@ let additionalPlanes = [];
 let extraLines = [];
 let selectedLine = -1;
 let dragging = null;
+let lastVertexTap = null;
 let activeTool = 'magic';
 let painting = false;
 let paintPoints = [];
@@ -39,7 +40,7 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Choose the move vertex tool to drag points, or use add/remove for more detail. Then select a line to classify it.'
+    ? 'Double-tap a point to enable moving, or use add/remove for more detail. Then select a line to classify it.'
     : 'Choose the magic lasso, then paint a roof sample. Use the dedicated vertex tools to refine the result.';
 }
 
@@ -89,7 +90,12 @@ function render() {
         extraLines=extraLines.filter(line=>line.a!==index&&line.b!==index).map(line=>({ ...line,a:line.a>index?line.a-1:line.a,b:line.b>index?line.b-1:line.b }));
         selectedLine=-1; render(); toast('Vertex removed'); return;
       }
-      if(activeTool!=='move'){toast('Choose the move vertex tool to drag points');return;}
+      if(activeTool!=='move') {
+        const now=performance.now(), isDoubleTap=lastVertexTap?.index===index&&now-lastVertexTap.time<500;
+        lastVertexTap=isDoubleTap?null:{index,time:now};
+        if(!isDoubleTap){toast('Double-tap the point or choose the move vertex tool');return;}
+        setTool('move'); toast('Move vertex tool enabled');
+      }
       dragging=index; canvas.setPointerCapture(event.pointerId); canvas.classList.add('moving-vertex'); showVertexMagnifier(event); render();
     });
     vertexLayer.append(el);
