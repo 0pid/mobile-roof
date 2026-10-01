@@ -65,6 +65,7 @@
           <div class="map-toolbar top-tools">
             <button class="active magic-tool" data-tool="magic" aria-label="Magic lasso tool" title="Magic lasso">✦</button>
             <button data-tool="trace" aria-label="Trace roof lines tool" title="Trace roof lines">⌁</button>
+            <button data-tool="line" aria-label="Connect roof planes tool" title="Connect roof planes">╱</button>
             <button data-tool="vertex" aria-label="Add vertex tool" title="Add vertex">＋</button>
             <button data-tool="remove" aria-label="Remove vertex tool" title="Remove vertex">−</button>
             <button data-tool="move" aria-label="Move vertex tool" title="Move vertex">✥</button>
@@ -109,7 +110,7 @@
             <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
             <button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button>
           </div>
-          <p class="editor-help" id="editorHelp">Paint with the magic lasso, or trace directly over visible roof lines. Double-tap a point to move it, or use the add, remove, and move vertex tools.</p>
+          <p class="editor-help" id="editorHelp">Trace each roof plane, then use Connect roof planes to join vertices across polygons. Double-tap any point to move it.</p>
           <div class="line-types" id="lineTypes">
             <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>34.2 ft selected</small></span><b>✓</b></button>
             <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>

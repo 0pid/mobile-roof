@@ -1,6 +1,8 @@
 let points = [];
 let additionalPlanes = [];
 let extraLines = [];
+let connectingLines = [];
+let connectionStart = null;
 let selectedLine = -1;
 let dragging = null;
 let lastVertexTap = null;
@@ -33,15 +35,16 @@ function svgEl(name, attrs={}) {
 
 function updateProgress() {
   const hasRoof = points.length > 2;
-  document.querySelector('#lineCount').textContent = hasRoof ? points.length + extraLines.length : 0;
-  document.querySelector('#vertexCount').textContent = points.length;
+  const secondaryEdges=additionalPlanes.reduce((sum,plane)=>sum+plane.points.length,0);
+  document.querySelector('#lineCount').textContent = hasRoof ? points.length + secondaryEdges + extraLines.length + connectingLines.length : 0;
+  document.querySelector('#vertexCount').textContent = points.length + secondaryEdges;
   document.querySelector('#areaValue').textContent = hasRoof && selectedAreaSquareFeet ? Math.round(selectedAreaSquareFeet).toLocaleString() : '—';
   document.querySelector('#progressValue').textContent = hasRoof ? '42%' : '0%';
   document.querySelector('#progressBar').style.width = hasRoof ? '42%' : '0%';
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Double-tap a point to enable moving, or use add/remove for more detail. Then select a line to classify it.'
+    ? 'Trace another plane or connect vertices across polygons, then refine and classify the roof lines.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
 }
 
@@ -60,14 +63,21 @@ function render() {
       additionalPlanes[index]={points:[...points],confidence:1}; points=plane.points; selectedLine=-1; render(); toast('Roof plane selected for editing');
     });
     planeLayer.append(polygon);
+    if(activeTool==='line')plane.points.forEach(point=>{
+      const vertex=svgEl('circle',{cx:point.x,cy:point.y,r:7,class:'vertex secondary-vertex'});
+      vertex.addEventListener('pointerdown',event=>{event.preventDefault();event.stopPropagation();pickConnectionVertex(point);});
+      planeLayer.append(vertex);
+    });
   });
   const lines = points.length > 2
     ? points.map((_,index) => ({a:index,b:(index+1)%points.length,type:'Eave'})).concat(extraLines)
     : [];
-  lines.forEach((line,index) => {
-    const el = svgEl('line', {x1:points[line.a].x,y1:points[line.a].y,x2:points[line.b].x,y2:points[line.b].y,class:`roof-line ${index===selectedLine?'selected':''} ${index>=points.length?'internal':''}`});
+  lines.concat(connectingLines.map(line=>({pointA:line.a,pointB:line.b,type:line.type,connection:true}))).forEach((line,index) => {
+    const start=line.connection?line.pointA:points[line.a],end=line.connection?line.pointB:points[line.b];
+    const el = svgEl('line', {x1:start.x,y1:start.y,x2:end.x,y2:end.y,class:`roof-line ${index===selectedLine?'selected':''} ${index>=points.length?'internal':''}`});
     if (index === selectedLine) el.style.stroke = colors[line.type];
     el.addEventListener('pointerdown', event => {
+      if(line.connection){event.stopPropagation();selectedLine=index;render();selectType(line.type);return;}
       if (activeTool === 'vertex' && index < points.length) {
         event.stopPropagation();
         const point = toSvg(event);
@@ -85,9 +95,11 @@ function render() {
     const el = svgEl('circle', {cx:point.x,cy:point.y,r:8,class:`vertex ${dragging===index?'selected':''}`});
     el.addEventListener('pointerdown', event => {
       event.preventDefault(); event.stopPropagation();
+      if(activeTool==='line'){pickConnectionVertex(point);return;}
       if(activeTool==='remove') {
         if(points.length<=3){toast('A roof needs at least three vertices');return;}
         points.splice(index,1);
+        connectingLines=connectingLines.filter(line=>line.a!==point&&line.b!==point);
         extraLines=extraLines.filter(line=>line.a!==index&&line.b!==index).map(line=>({ ...line,a:line.a>index?line.a-1:line.a,b:line.b>index?line.b-1:line.b }));
         selectedLine=-1; render(); toast('Vertex removed'); return;
       }
@@ -102,6 +114,12 @@ function render() {
     vertexLayer.append(el);
   });
   updateProgress();
+}
+
+function pickConnectionVertex(point) {
+  if(!connectionStart){connectionStart=point;toast('Now choose a vertex on another roof plane');return;}
+  if(connectionStart===point){toast('Choose a different vertex');return;}
+  connectingLines.push({a:connectionStart,b:point,type:'Ridge'});connectionStart=null;selectedLine=points.length+extraLines.length+connectingLines.length-1;render();toast('Roof planes connected');
 }
 
 function toSvg(event) { const point=canvas.createSVGPoint(); point.x=event.clientX; point.y=event.clientY; return point.matrixTransform(canvas.getScreenCTM().inverse()); }
@@ -390,7 +408,6 @@ function intersectStructuralLines(first, second, fallback) {
 }
 
 function traceRoofLines(stroke) {
-  if(points.length)return;
   const pulse=document.querySelector('#selectionPulse');
   pulse.innerHTML=`<polyline class="paint-stroke processing" points="${stroke.map(point=>`${point.x},${point.y}`).join(' ')}"/>`;
   document.querySelector('#magicTip strong').textContent='Snapping trace to roof edges…';
@@ -416,7 +433,8 @@ function traceRoofLines(stroke) {
     });
     const outline=guide.map((corner,index)=>intersectStructuralLines(fittedLines[(index-1+fittedLines.length)%fittedLines.length],fittedLines[index],corner));
     if(outline.length<3){pulse.innerHTML='';toast('Trace at least three roof edges');return;}
-    points=outline.map(stageToSvg);additionalPlanes=[];extraLines=[];selectedLine=0;
+    if(points.length)additionalPlanes.push({points:[...points],confidence:1});
+    points=outline.map(stageToSvg);extraLines=[];selectedLine=0;
     const areaPixels=Math.abs(outline.reduce((sum,point,index)=>{const next=outline[(index+1)%outline.length];return sum+point.x*next.y-next.x*point.y;},0))/2;
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
     selectedAreaSquareFeet=areaPixels*metersPerPixel**2*10.7639;
@@ -444,14 +462,14 @@ canvas.addEventListener('pointerdown', event => {
     canvas.setPointerCapture(event.pointerId); canvas.classList.add('panning');
     return;
   }
-  if(!['magic','trace'].includes(activeTool) || points.length)return;
+  if(!['magic','trace'].includes(activeTool) || (activeTool==='magic'&&points.length))return;
   event.preventDefault(); painting=true; paintPoints=[]; canvas.setPointerCapture(event.pointerId); appendPaintPoint(event);
   document.querySelector('#magicTip strong').textContent=activeTool==='trace'?'Trace along the roof border':'Paint across the roof plane';
   document.querySelector('#magicTip span').textContent=activeTool==='trace'?'Follow the visible roof lines and release to snap.':'Release when the roof surface is covered.';
 });
 canvas.addEventListener('pointermove', event=>{
   if(dragging!==null && activeTool==='move') {
-    const next=toSvg(event); points[dragging]={x:next.x,y:next.y}; render(); showVertexMagnifier(event); return;
+    const next=toSvg(event); points[dragging].x=next.x;points[dragging].y=next.y; render(); showVertexMagnifier(event); return;
   }
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
@@ -470,13 +488,13 @@ canvas.addEventListener('pointerup', event=>{
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     mapCenter={lon:xToLon(panGesture.centerX-offsetX/256,mapZoom),lat:yToLat(panGesture.centerY-offsetY/256,mapZoom)};
-    const translatePoint=point=>{const stagePoint=svgToStage(point);return stageToSvg({x:stagePoint.x+offsetX,y:stagePoint.y+offsetY});};
+    const translatePoint=point=>{const stagePoint=svgToStage(point),translated=stageToSvg({x:stagePoint.x+offsetX,y:stagePoint.y+offsetY});point.x=translated.x;point.y=translated.y;return point;};
     points=points.map(translatePoint); additionalPlanes=additionalPlanes.map(plane=>({...plane,points:plane.points.map(translatePoint)}));
     if(selectionMask.width&&selectionMask.height){const copy=document.createElement('canvas');copy.width=selectionMask.width;copy.height=selectionMask.height;copy.getContext('2d').drawImage(selectionMask,0,0);const context=selectionMask.getContext('2d');context.clearRect(0,0,selectionMask.width,selectionMask.height);context.drawImage(copy,offsetX,offsetY);}
     panGesture=null; canvas.classList.remove('panning'); document.querySelector('#tileLayer').style.transform=''; selectionMask.style.transform='';
     if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
     renderTiles(); render();
-    if(temporaryPanTool!==null){const previousTool=temporaryPanTool;temporaryPanTool=null;setTool(previousTool);toast(`${previousTool==='magic'?'Magic lasso':previousTool==='trace'?'Trace roof lines':previousTool==='vertex'?'Add vertex':previousTool==='remove'?'Remove vertex':previousTool==='move'?'Move vertex':'Pan'} tool restored`);}
+    if(temporaryPanTool!==null){const previousTool=temporaryPanTool;temporaryPanTool=null;setTool(previousTool);toast(`${previousTool==='magic'?'Magic lasso':previousTool==='trace'?'Trace roof lines':previousTool==='line'?'Connect roof planes':previousTool==='vertex'?'Add vertex':previousTool==='remove'?'Remove vertex':previousTool==='move'?'Move vertex':'Pan'} tool restored`);}
     else toast('Map repositioned');
     return;
   }
@@ -490,7 +508,8 @@ canvas.addEventListener('auxclick',event=>{if(event.button===1)event.preventDefa
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
   const type=button.dataset.type;
-  if(selectedLine>=points.length) extraLines[selectedLine-points.length].type=type;
+  if(selectedLine>=points.length+extraLines.length)connectingLines[selectedLine-points.length-extraLines.length].type=type;
+  else if(selectedLine>=points.length)extraLines[selectedLine-points.length].type=type;
   selectType(type); render(); toast(`Line classified as ${type}`);
 }));
 document.querySelector('#dismissTip').addEventListener('click',()=>document.querySelector('#magicTip').classList.add('hidden'));
@@ -527,7 +546,7 @@ function renderTiles(){
 }
 
 function clearRoofSelection(activateMagic=true) {
-  points=[]; additionalPlanes=[]; extraLines=[]; selectedLine=-1; selectedAreaSquareFeet=0;
+  points=[]; additionalPlanes=[]; extraLines=[]; connectingLines=[]; connectionStart=null; selectedLine=-1; selectedAreaSquareFeet=0;
   selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
   document.querySelector('#selectionPulse').innerHTML='';
   polygonVisible=true; canvas.classList.remove('outline-hidden');
@@ -571,7 +590,7 @@ document.querySelector('#addressForm').addEventListener('submit',async event=>{
 document.querySelector('#googleLink').addEventListener('click',()=>window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(document.querySelector('#address').value)}`,'_blank','noopener'));
 document.querySelector('#shareBtn').addEventListener('click',async()=>{const data={title:'Roofline measurement',text:'Review this roof measurement',url:location.href};if(navigator.share)await navigator.share(data);else{await navigator.clipboard?.writeText(location.href);toast('Share link copied');}});
 document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
-document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];additionalPlanes=[];extraLines=[];selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
+document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];additionalPlanes=[];extraLines=[];connectingLines=[];connectionStart=null;selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
 document.querySelector('#togglePolygon').addEventListener('click',event=>{
   if(!points.length){toast('Trace a roof before toggling its polygon');return;}
@@ -592,8 +611,9 @@ document.querySelector('#sheetToggle').addEventListener('click',event=>{
 });
 document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{
   setTool(button.dataset.tool);
-  const names={magic:'Magic lasso',trace:'Trace roof lines',vertex:'Add vertex',remove:'Remove vertex',move:'Move vertex',pan:'Pan'};
+  const names={magic:'Magic lasso',trace:'Trace roof lines',line:'Connect roof planes',vertex:'Add vertex',remove:'Remove vertex',move:'Move vertex',pan:'Pan'};
   toast(`${names[button.dataset.tool]} tool active`);
+  if(button.dataset.tool==='line')render();
 }));
 window.addEventListener('resize',renderTiles);
 renderTiles(); render();
