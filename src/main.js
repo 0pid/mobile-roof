@@ -26,6 +26,13 @@ const planeLayer = document.querySelector('#planeLayer');
 const selectionMask = document.querySelector('#selectionMask');
 const vertexMagnifier = document.querySelector('#vertexMagnifier');
 const imageryCanvas = document.createElement('canvas');
+const pointIds = new WeakMap();
+let nextPointId = 1;
+
+function pointId(point){if(!pointIds.has(point))pointIds.set(point,nextPointId++);return pointIds.get(point);}
+function edgeKey(first,second){const ids=[pointId(first),pointId(second)].sort((a,b)=>a-b);return `${ids[0]}:${ids[1]}`;}
+function boundaryEdgeCounts(){const counts=new Map();allPlanePointArrays().forEach(plane=>plane.forEach((point,index)=>{const key=edgeKey(point,plane[(index+1)%plane.length]);counts.set(key,(counts.get(key)||0)+1);}));return counts;}
+function boundaryEdgeKeys(){return new Set(boundaryEdgeCounts().keys());}
 
 function svgEl(name, attrs={}) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -35,8 +42,8 @@ function svgEl(name, attrs={}) {
 
 function updateProgress() {
   const hasRoof = points.length > 2;
-  const secondaryEdges=additionalPlanes.reduce((sum,plane)=>sum+plane.points.length,0);
-  document.querySelector('#lineCount').textContent = hasRoof ? points.length + secondaryEdges + extraLines.length + connectingLines.length : 0;
+  const secondaryEdges=additionalPlanes.reduce((sum,plane)=>sum+plane.points.length,0),uniqueBoundaryCount=boundaryEdgeKeys().size;
+  document.querySelector('#lineCount').textContent = hasRoof ? uniqueBoundaryCount + extraLines.length + connectingLines.length : 0;
   document.querySelector('#vertexCount').textContent = points.length + secondaryEdges;
   document.querySelector('#areaValue').textContent = hasRoof && selectedAreaSquareFeet ? Math.round(selectedAreaSquareFeet).toLocaleString() : '—';
   document.querySelector('#progressValue').textContent = hasRoof ? '42%' : '0%';
@@ -44,7 +51,7 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Trace another plane or connect vertices across polygons, then refine and classify the roof lines.'
+    ? 'Trace into existing edges to merge planes, connect separate vertices, or drag vertices together to merge them.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
 }
 
@@ -69,8 +76,9 @@ function render() {
       planeLayer.append(vertex);
     });
   });
+  const edgeCounts=boundaryEdgeCounts();
   const lines = points.length > 2
-    ? points.map((_,index) => ({a:index,b:(index+1)%points.length,type:'Eave'})).concat(extraLines)
+    ? points.map((point,index) => ({a:index,b:(index+1)%points.length,type:edgeCounts.get(edgeKey(point,points[(index+1)%points.length]))>1?'Ridge':'Eave'})).concat(extraLines)
     : [];
   lines.concat(connectingLines.map(line=>({pointA:line.a,pointB:line.b,type:line.type,connection:true}))).forEach((line,index) => {
     const start=line.connection?line.pointA:points[line.a],end=line.connection?line.pointB:points[line.b];
@@ -119,7 +127,38 @@ function render() {
 function pickConnectionVertex(point) {
   if(!connectionStart){connectionStart=point;toast('Now choose a vertex on another roof plane');return;}
   if(connectionStart===point){toast('Choose a different vertex');return;}
+  if(boundaryEdgeKeys().has(edgeKey(connectionStart,point))){connectionStart=null;toast('Those vertices already share one roof edge');return;}
+  if(connectingLines.some(line=>(line.a===connectionStart&&line.b===point)||(line.a===point&&line.b===connectionStart))){connectionStart=null;toast('Those vertices are already connected');return;}
   connectingLines.push({a:connectionStart,b:point,type:'Ridge'});connectionStart=null;selectedLine=points.length+extraLines.length+connectingLines.length-1;render();toast('Roof planes connected');
+}
+
+function allPlanePointArrays(){return [points,...additionalPlanes.map(plane=>plane.points)];}
+
+function mergeTracedPolygon(candidatePoints) {
+  const snapDistance=12,edgeDistance=10;
+  return candidatePoints.map(candidate=>{
+    const candidateStage=svgToStage(candidate);
+    for(const plane of allPlanePointArrays())for(const existing of plane)if(Math.hypot(svgToStage(existing).x-candidateStage.x,svgToStage(existing).y-candidateStage.y)<=snapDistance)return existing;
+    let best=null;
+    for(const plane of allPlanePointArrays())for(let index=0;index<plane.length;index++){
+      const start=svgToStage(plane[index]),end=svgToStage(plane[(index+1)%plane.length]),dx=end.x-start.x,dy=end.y-start.y,lengthSquared=dx*dx+dy*dy;
+      const t=lengthSquared?Math.max(0,Math.min(1,((candidateStage.x-start.x)*dx+(candidateStage.y-start.y)*dy)/lengthSquared)):0;
+      const projected={x:start.x+t*dx,y:start.y+t*dy},distance=Math.hypot(candidateStage.x-projected.x,candidateStage.y-projected.y);
+      if(t>.08&&t<.92&&distance<=edgeDistance&&(!best||distance<best.distance))best={plane,index,projected,distance};
+    }
+    if(best){const shared=stageToSvg(best.projected);best.plane.splice(best.index+1,0,shared);return shared;}
+    return candidate;
+  }).filter((point,index,array)=>!index||point!==array[index-1]).filter((point,index,array)=>index||point!==array.at(-1));
+}
+
+function mergeMovedVertex(index) {
+  const moving=points[index],movingStage=svgToStage(moving);
+  let target=null;
+  for(const plane of allPlanePointArrays())for(const candidate of plane)if(candidate!==moving&&Math.hypot(svgToStage(candidate).x-movingStage.x,svgToStage(candidate).y-movingStage.y)<=12){target=candidate;break;}
+  if(!target)return false;
+  allPlanePointArrays().forEach(plane=>{for(let pointIndex=plane.length-1;pointIndex>=0;pointIndex--){if(plane[pointIndex]===moving)plane[pointIndex]=target;if(plane.length>3&&plane[pointIndex]===plane[(pointIndex-1+plane.length)%plane.length])plane.splice(pointIndex,1);}});
+  connectingLines.forEach(line=>{if(line.a===moving)line.a=target;if(line.b===moving)line.b=target;});
+  const seen=new Set();connectingLines=connectingLines.filter(line=>{if(line.a===line.b)return false;const key=edgeKey(line.a,line.b);if(seen.has(key)||boundaryEdgeKeys().has(key))return false;seen.add(key);return true;});return true;
 }
 
 function toSvg(event) { const point=canvas.createSVGPoint(); point.x=event.clientX; point.y=event.clientY; return point.matrixTransform(canvas.getScreenCTM().inverse()); }
@@ -463,8 +502,9 @@ function traceRoofLines(stroke) {
     });
     const outline=guide.map((corner,index)=>intersectStructuralLines(fittedLines[(index-1+fittedLines.length)%fittedLines.length],fittedLines[index],corner));
     if(outline.length<3){pulse.innerHTML='';toast('Trace at least three roof edges');return;}
+    const mergedOutline=mergeTracedPolygon(outline.map(stageToSvg));
     if(points.length)additionalPlanes.push({points:[...points],confidence:1});
-    points=outline.map(stageToSvg);extraLines=[];selectedLine=0;
+    points=mergedOutline;extraLines=[];selectedLine=0;
     const areaPixels=Math.abs(outline.reduce((sum,point,index)=>{const next=outline[(index+1)%outline.length];return sum+point.x*next.y-next.x*point.y;},0))/2;
     const metersPerPixel=Math.cos(mapCenter.lat*Math.PI/180)*156543.03392/2**mapZoom;
     selectedAreaSquareFeet=areaPixels*metersPerPixel**2*10.7639;
@@ -511,9 +551,9 @@ canvas.addEventListener('pointermove', event=>{
 });
 canvas.addEventListener('pointerup', event=>{
   if(dragging!==null) {
-    dragging=null; hideVertexMagnifier();
+    const merged=mergeMovedVertex(dragging);dragging=null; hideVertexMagnifier();
     if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
-    render(); toast('Vertex updated'); return;
+    render(); toast(merged?'Vertices merged':'Vertex updated'); return;
   }
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
