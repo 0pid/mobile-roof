@@ -407,11 +407,31 @@ function intersectStructuralLines(first, second, fallback) {
   return Math.hypot(point.x-fallback.x,point.y-fallback.y)>32?fallback:point;
 }
 
+function pointInsidePolygon(point, polygon) {
+  let inside=false;
+  for(let index=0,previous=polygon.length-1;index<polygon.length;previous=index++) {
+    const current=polygon[index],before=polygon[previous];
+    if(((current.y>point.y)!==(before.y>point.y))&&(point.x<(before.x-current.x)*(point.y-current.y)/(before.y-current.y)+current.x))inside=!inside;
+  }
+  return inside;
+}
+
+function sampleInteriorPalette(polygon, pixel, width, height) {
+  const left=Math.max(0,Math.floor(Math.min(...polygon.map(point=>point.x)))),right=Math.min(width-1,Math.ceil(Math.max(...polygon.map(point=>point.x))));
+  const top=Math.max(0,Math.floor(Math.min(...polygon.map(point=>point.y)))),bottom=Math.min(height-1,Math.ceil(Math.max(...polygon.map(point=>point.y))));
+  const buckets=new Map();
+  for(let y=top;y<=bottom;y+=4)for(let x=left;x<=right;x+=4)if(pointInsidePolygon({x,y},polygon)){
+    const color=pixel(x,y),key=color.map(channel=>Math.round(channel/16)).join(',');
+    const bucket=buckets.get(key)||{count:0,total:[0,0,0]};bucket.count++;color.forEach((channel,index)=>bucket.total[index]+=channel);buckets.set(key,bucket);
+  }
+  return [...buckets.values()].sort((a,b)=>b.count-a.count).slice(0,6).map(bucket=>bucket.total.map(total=>total/bucket.count));
+}
+
 function traceRoofLines(stroke) {
   const pulse=document.querySelector('#selectionPulse');
   pulse.innerHTML=`<polyline class="paint-stroke processing" points="${stroke.map(point=>`${point.x},${point.y}`).join(' ')}"/>`;
   document.querySelector('#magicTip strong').textContent='Snapping trace to roof edges…';
-  document.querySelector('#magicTip span').textContent='Searching near your line for the strongest imagery edges.';
+  document.querySelector('#magicTip span').textContent='Sampling the enclosed roof colors, then fitting nearby imagery edges.';
   window.setTimeout(()=>{
     const width=imageryCanvas.width,height=imageryCanvas.height,context=imageryCanvas.getContext('2d',{willReadFrequently:true});
     let source; try{source=context.getImageData(0,0,width,height).data;}catch{source=null;}
@@ -419,14 +439,24 @@ function traceRoofLines(stroke) {
     const edgeAt=(x,y)=>Math.max(colorDistance(pixel(x-2,y),pixel(x+2,y)),colorDistance(pixel(x,y-2),pixel(x,y+2)));
     const stageStroke=stroke.map(svgToStage);
     const guide=simplifyClosedPath(stageStroke,Math.max(12,Math.min(width,height)*.018));
+    const interiorPalette=source?sampleInteriorPalette(guide,pixel,width,height):[];
+    const paletteDistance=color=>interiorPalette.length?Math.min(...interiorPalette.map(sample=>colorDistance(color,sample))):0;
+    const winding=guide.reduce((sum,point,index)=>{const next=guide[(index+1)%guide.length];return sum+point.x*next.y-next.x*point.y;},0);
     const fittedLines=guide.map((start,index)=>{
-      const end=guide[(index+1)%guide.length],dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),normal={x:-dy/length,y:dx/length},samples=[];
+      const end=guide[(index+1)%guide.length],dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),normal={x:-dy/length,y:dx/length};
+      const interiorNormal=winding>0?{x:-dy/length,y:dx/length}:{x:dy/length,y:-dx/length},samples=[];
       const sampleCount=Math.max(4,Math.ceil(length/5));
       for(let sample=0;sample<=sampleCount;sample++){
         const base={x:start.x+dx*sample/sampleCount,y:start.y+dy*sample/sampleCount};
         if(!source){samples.push(base);continue;}
         let best={...base,score:-Infinity};
-        for(let offset=-14;offset<=14;offset+=2){const x=Math.round(base.x+normal.x*offset),y=Math.round(base.y+normal.y*offset);if(x<2||y<2||x>=width-2||y>=height-2)continue;const score=edgeAt(x,y)-Math.abs(offset)*.85;if(score>best.score)best={x,y,score};}
+        for(let offset=-14;offset<=14;offset+=2){
+          const x=Math.round(base.x+normal.x*offset),y=Math.round(base.y+normal.y*offset);if(x<6||y<6||x>=width-6||y>=height-6)continue;
+          const insideColor=pixel(Math.round(x+interiorNormal.x*5),Math.round(y+interiorNormal.y*5));
+          const outsideColor=pixel(Math.round(x-interiorNormal.x*5),Math.round(y-interiorNormal.y*5));
+          const insideMatch=Math.max(0,28-paletteDistance(insideColor)),outsideSeparation=Math.min(28,paletteDistance(outsideColor));
+          const score=edgeAt(x,y)+insideMatch*.8+outsideSeparation*.45-Math.abs(offset)*.85;if(score>best.score)best={x,y,score};
+        }
         samples.push({x:best.x,y:best.y});
       }
       return fitStructuralLine(samples);
