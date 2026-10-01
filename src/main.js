@@ -352,6 +352,43 @@ function magicSelect(stroke) {
   }, 700);
 }
 
+function simplifyOpenPath(path, epsilon) {
+  if(path.length<3)return path;
+  const first=path[0],last=path.at(-1),dx=last.x-first.x,dy=last.y-first.y,lengthSquared=dx*dx+dy*dy;
+  let furthest=0,index=0;
+  for(let i=1;i<path.length-1;i++){
+    const t=lengthSquared?Math.max(0,Math.min(1,((path[i].x-first.x)*dx+(path[i].y-first.y)*dy)/lengthSquared)):0;
+    const distance=Math.hypot(path[i].x-(first.x+t*dx),path[i].y-(first.y+t*dy));
+    if(distance>furthest){furthest=distance;index=i;}
+  }
+  if(furthest<=epsilon)return [first,last];
+  return simplifyOpenPath(path.slice(0,index+1),epsilon).slice(0,-1).concat(simplifyOpenPath(path.slice(index),epsilon));
+}
+
+function simplifyClosedPath(path, epsilon) {
+  if(path.length<4)return path;
+  let first=0,second=1,maxDistance=0;
+  for(let i=0;i<path.length;i++)for(let j=i+1;j<path.length;j++){const distance=Math.hypot(path[i].x-path[j].x,path[i].y-path[j].y);if(distance>maxDistance){maxDistance=distance;first=i;second=j;}}
+  const arc=(start,end)=>{const result=[];for(let index=start;;index=(index+1)%path.length){result.push(path[index]);if(index===end)break;}return result;};
+  return simplifyOpenPath(arc(first,second),epsilon).slice(0,-1).concat(simplifyOpenPath(arc(second,first),epsilon).slice(0,-1));
+}
+
+function fitStructuralLine(samples) {
+  const center=samples.reduce((sum,point)=>({x:sum.x+point.x/samples.length,y:sum.y+point.y/samples.length}),{x:0,y:0});
+  let xx=0,xy=0,yy=0;samples.forEach(point=>{const x=point.x-center.x,y=point.y-center.y;xx+=x*x;xy+=x*y;yy+=y*y;});
+  const angle=.5*Math.atan2(2*xy,xx-yy);
+  return {point:center,direction:{x:Math.cos(angle),y:Math.sin(angle)}};
+}
+
+function intersectStructuralLines(first, second, fallback) {
+  const cross=first.direction.x*second.direction.y-first.direction.y*second.direction.x;
+  if(Math.abs(cross)<.08)return fallback;
+  const dx=second.point.x-first.point.x,dy=second.point.y-first.point.y;
+  const distance=(dx*second.direction.y-dy*second.direction.x)/cross;
+  const point={x:first.point.x+distance*first.direction.x,y:first.point.y+distance*first.direction.y};
+  return Math.hypot(point.x-fallback.x,point.y-fallback.y)>32?fallback:point;
+}
+
 function traceRoofLines(stroke) {
   if(points.length)return;
   const pulse=document.querySelector('#selectionPulse');
@@ -364,16 +401,20 @@ function traceRoofLines(stroke) {
     const pixel=(x,y)=>{const index=(Math.max(0,Math.min(height-1,y))*width+Math.max(0,Math.min(width-1,x)))*4;return [source[index],source[index+1],source[index+2]];};
     const edgeAt=(x,y)=>Math.max(colorDistance(pixel(x-2,y),pixel(x+2,y)),colorDistance(pixel(x,y-2),pixel(x,y+2)));
     const stageStroke=stroke.map(svgToStage);
-    const snapped=stageStroke.map(point=>{
-      if(!source)return point;
-      let best={x:point.x,y:point.y,score:-Infinity};
-      for(let offsetY=-12;offsetY<=12;offsetY+=2)for(let offsetX=-12;offsetX<=12;offsetX+=2){
-        const x=Math.round(point.x+offsetX),y=Math.round(point.y+offsetY);if(x<2||y<2||x>=width-2||y>=height-2)continue;
-        const score=edgeAt(x,y)-Math.hypot(offsetX,offsetY)*1.15;if(score>best.score)best={x,y,score};
+    const guide=simplifyClosedPath(stageStroke,Math.max(12,Math.min(width,height)*.018));
+    const fittedLines=guide.map((start,index)=>{
+      const end=guide[(index+1)%guide.length],dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),normal={x:-dy/length,y:dx/length},samples=[];
+      const sampleCount=Math.max(4,Math.ceil(length/5));
+      for(let sample=0;sample<=sampleCount;sample++){
+        const base={x:start.x+dx*sample/sampleCount,y:start.y+dy*sample/sampleCount};
+        if(!source){samples.push(base);continue;}
+        let best={...base,score:-Infinity};
+        for(let offset=-14;offset<=14;offset+=2){const x=Math.round(base.x+normal.x*offset),y=Math.round(base.y+normal.y*offset);if(x<2||y<2||x>=width-2||y>=height-2)continue;const score=edgeAt(x,y)-Math.abs(offset)*.85;if(score>best.score)best={x,y,score};}
+        samples.push({x:best.x,y:best.y});
       }
-      return {x:best.x,y:best.y};
-    }).filter((point,index,array)=>!index||Math.hypot(point.x-array[index-1].x,point.y-array[index-1].y)>3);
-    const outline=simplifyHull(snapped,16);
+      return fitStructuralLine(samples);
+    });
+    const outline=guide.map((corner,index)=>intersectStructuralLines(fittedLines[(index-1+fittedLines.length)%fittedLines.length],fittedLines[index],corner));
     if(outline.length<3){pulse.innerHTML='';toast('Trace at least three roof edges');return;}
     points=outline.map(stageToSvg);additionalPlanes=[];extraLines=[];selectedLine=0;
     const areaPixels=Math.abs(outline.reduce((sum,point,index)=>{const next=outline[(index+1)%outline.length];return sum+point.x*next.y-next.x*point.y;},0))/2;
