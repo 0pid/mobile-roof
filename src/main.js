@@ -225,6 +225,10 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const step=3, cols=Math.ceil(width/step), rows=Math.ceil(height/step);
   const seeds=stagePoints.map(point=>({x:Math.max(0,Math.min(cols-1,Math.floor(point.x/step))),y:Math.max(0,Math.min(rows-1,Math.floor(point.y/step)))}));
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
+  const edgeStrengthAt=(x,y)=>Math.max(
+    colorDistance(pixelAt(Math.max(0,x-1),y),pixelAt(Math.min(cols-1,x+1),y)),
+    colorDistance(pixelAt(x,Math.max(0,y-1)),pixelAt(x,Math.min(rows-1,y+1)))
+  );
   if(seeds.some(seed=>pixelAt(seed.x,seed.y)[3]<200))return null;
   const paintedColors=seeds.map(seed=>samplePaintColor(pixelAt,seed,cols,rows));
   const palette=chooseRepresentativeColors(paintedColors);
@@ -245,7 +249,9 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
     for(const [nextX,nextY] of neighbors) {
       if(nextX<0||nextY<0||nextX>=cols||nextY>=rows)continue;
       const nextIndex=nextY*cols+nextX;
-      if(!visited[nextIndex] && matchesPalette(pixelAt(nextX,nextY))){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
+      const nextColor=pixelAt(nextX,nextY);
+      const crossesEdge=edgeStrengthAt(nextX,nextY)>19 && colorDistance(current,nextColor)>6;
+      if(!visited[nextIndex] && matchesPalette(nextColor) && !crossesEdge){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
     }
   }
   count+=fillEnclosedMaskAreas(mask,cols,rows);
@@ -282,7 +288,7 @@ function magicSelect(stroke) {
     let selection;
     try {
       const stagePoints=stroke.map(svgToStage);
-      for(const tolerance of [8,12,16,22,28]) {
+      for(const tolerance of [6,10,14,18]) {
         const candidate=tracePaintedRegion(stagePoints,tolerance);
         if(!candidate)continue;
         selection=candidate;
