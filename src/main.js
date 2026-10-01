@@ -8,6 +8,7 @@ let activeTool = 'magic';
 let painting = false;
 let paintPoints = [];
 let panGesture = null;
+let temporaryPanTool = null;
 let polygonVisible = true;
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
@@ -358,9 +359,12 @@ function appendPaintPoint(event) {
   document.querySelector('#selectionPulse').innerHTML=`<polyline class="paint-stroke" points="${paintPoints.map(item=>`${item.x},${item.y}`).join(' ')}"/>`;
 }
 canvas.addEventListener('pointerdown', event => {
+  if(event.pointerType==='mouse'&&event.button===1) {
+    temporaryPanTool=activeTool;
+    setTool('pan');
+  }
   if(activeTool==='pan') {
     event.preventDefault();
-    clearRoofSelection(false);
     panGesture={pointerId:event.pointerId,startX:event.clientX,startY:event.clientY,centerX:lonToX(mapCenter.lon,mapZoom),centerY:latToY(mapCenter.lat,mapZoom)};
     canvas.setPointerCapture(event.pointerId); canvas.classList.add('panning');
     return;
@@ -377,6 +381,7 @@ canvas.addEventListener('pointermove', event=>{
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     document.querySelector('#tileLayer').style.transform=`translate(${offsetX}px,${offsetY}px)`;
+    selectionMask.style.transform=`translate(${offsetX}px,${offsetY}px)`;
     return;
   }
   if(painting)appendPaintPoint(event);
@@ -390,15 +395,22 @@ canvas.addEventListener('pointerup', event=>{
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     mapCenter={lon:xToLon(panGesture.centerX-offsetX/256,mapZoom),lat:yToLat(panGesture.centerY-offsetY/256,mapZoom)};
-    panGesture=null; canvas.classList.remove('panning'); document.querySelector('#tileLayer').style.transform='';
+    const translatePoint=point=>{const stagePoint=svgToStage(point);return stageToSvg({x:stagePoint.x+offsetX,y:stagePoint.y+offsetY});};
+    points=points.map(translatePoint); additionalPlanes=additionalPlanes.map(plane=>({...plane,points:plane.points.map(translatePoint)}));
+    if(selectionMask.width&&selectionMask.height){const copy=document.createElement('canvas');copy.width=selectionMask.width;copy.height=selectionMask.height;copy.getContext('2d').drawImage(selectionMask,0,0);const context=selectionMask.getContext('2d');context.clearRect(0,0,selectionMask.width,selectionMask.height);context.drawImage(copy,offsetX,offsetY);}
+    panGesture=null; canvas.classList.remove('panning'); document.querySelector('#tileLayer').style.transform=''; selectionMask.style.transform='';
     if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
-    renderTiles(); toast('Map repositioned'); return;
+    renderTiles(); render();
+    if(temporaryPanTool!==null){const previousTool=temporaryPanTool;temporaryPanTool=null;setTool(previousTool);toast(`${previousTool==='magic'?'Magic lasso':previousTool==='vertex'?'Add vertex':previousTool==='remove'?'Remove vertex':previousTool==='move'?'Move vertex':'Pan'} tool restored`);}
+    else toast('Map repositioned');
+    return;
   }
   if(!painting)return; appendPaintPoint(event); painting=false;
   if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
   magicSelect([...paintPoints]);
 });
-canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];panGesture=null;dragging=null;hideVertexMagnifier();canvas.classList.remove('panning');document.querySelector('#tileLayer').style.transform='';document.querySelector('#selectionPulse').innerHTML='';});
+canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];panGesture=null;dragging=null;hideVertexMagnifier();canvas.classList.remove('panning');document.querySelector('#tileLayer').style.transform='';selectionMask.style.transform='';if(temporaryPanTool!==null){setTool(temporaryPanTool);temporaryPanTool=null;}document.querySelector('#selectionPulse').innerHTML='';});
+canvas.addEventListener('auxclick',event=>{if(event.button===1)event.preventDefault();});
 
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
