@@ -573,12 +573,10 @@ function showProperty(address) {
   document.querySelector('#magicTip').classList.remove('hidden');
   document.querySelector('#magicTip strong').textContent='Paint across a roof with the magic lasso';
   document.querySelector('#magicTip span').textContent='Paint the roof’s shape; we’ll preserve it and snap nearby points to visible edges.';
-  if(window.matchMedia('(max-width: 850px)').matches) {
-    document.querySelector('#sidePanel').classList.add('mobile-collapsed');
-    document.querySelector('#panelToggle').setAttribute('aria-expanded','false');
-    document.querySelector('#editorPanel').classList.remove('mobile-expanded');
-    document.querySelector('#sheetToggle').setAttribute('aria-expanded','false');
-  }
+  document.querySelector('#sidePanel').classList.add('panel-collapsed');
+  document.querySelector('#panelToggle').setAttribute('aria-expanded','false');
+  document.querySelector('#editorPanel').classList.remove('sheet-expanded');
+  document.querySelector('#sheetToggle').setAttribute('aria-expanded','false');
 }
 document.querySelector('#addressForm').addEventListener('submit',async event=>{
   event.preventDefault(); const input=document.querySelector('#address'); const address=input.value.trim(); if(!address){input.focus();toast('Enter a property address first');return;}
@@ -602,11 +600,11 @@ document.querySelector('#togglePolygon').addEventListener('click',event=>{
 document.querySelector('#zoomIn').addEventListener('click',()=>updateZoom(1));
 document.querySelector('#zoomOut').addEventListener('click',()=>updateZoom(-1));
 document.querySelector('#panelToggle').addEventListener('click',event=>{
-  const panel=document.querySelector('#sidePanel'), collapsed=panel.classList.toggle('mobile-collapsed');
+  const panel=document.querySelector('#sidePanel'), collapsed=panel.classList.toggle('panel-collapsed');
   event.currentTarget.setAttribute('aria-expanded',String(!collapsed));
 });
 document.querySelector('#sheetToggle').addEventListener('click',event=>{
-  const panel=document.querySelector('#editorPanel'), expanded=panel.classList.toggle('mobile-expanded');
+  const panel=document.querySelector('#editorPanel'), expanded=panel.classList.toggle('sheet-expanded');
   event.currentTarget.setAttribute('aria-expanded',String(expanded));
 });
 document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{
