@@ -14,6 +14,7 @@ let traceEndAnchor = null;
 let panGesture = null;
 let temporaryPanTool = null;
 let polygonVisible = true;
+let measurementComplete = false;
 let mapCenter = { lat: 30.2677, lon: -97.7431 };
 let selectedAreaSquareFeet = 0;
 let tileRenderId = 0;
@@ -80,13 +81,31 @@ function updateProgress() {
   document.querySelector('#lineCount').textContent = hasRoof ? uniqueBoundaryCount + extraLines.length + connectingLines.length : 0;
   document.querySelector('#vertexCount').textContent = points.length + secondaryEdges;
   document.querySelector('#areaValue').textContent = hasRoof && selectedAreaSquareFeet ? Math.round(selectedAreaSquareFeet).toLocaleString() : '—';
-  document.querySelector('#progressValue').textContent = hasRoof ? '42%' : '0%';
-  document.querySelector('#progressBar').style.width = hasRoof ? '42%' : '0%';
-  document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
-  document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
-  document.querySelector('#editorHelp').textContent = hasRoof
+  document.querySelector('#progressValue').textContent = measurementComplete ? '100%' : hasRoof ? '42%' : '0%';
+  document.querySelector('#progressBar').style.width = measurementComplete ? '100%' : hasRoof ? '42%' : '0%';
+  document.querySelector('#stepLabel').textContent = measurementComplete ? 'STEP 3 OF 3' : hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
+  document.querySelector('#editorTitle').textContent = measurementComplete ? 'Measurement complete' : hasRoof ? 'Refine roof outline' : 'Select the roof';
+  document.querySelector('#editorHelp').textContent = measurementComplete
+    ? 'Your roof geometry and line classifications are ready for review.'
+    : hasRoof
     ? 'Roof lines are classified automatically. Select a colored line to review it, or choose a category to correct it.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
+}
+
+function setMeasurementComplete(complete) {
+  measurementComplete=complete;
+  canvas.classList.toggle('measurement-complete',complete);
+  document.querySelectorAll('[data-tool],.line-type,#addVertexBtn,#autoClassifyBtn,#undoBtn,#redoBtn,#togglePolygon').forEach(control=>{control.disabled=complete;});
+  const finish=document.querySelector('#finishBtn'),summary=document.querySelector('#measurementSummary');
+  finish.innerHTML=complete?'Edit measurement <span>↩</span>':'Finish measurement <span>→</span>';
+  summary.hidden=!complete;
+  if(complete){
+    const lineTotal=boundaryEdgeKeys().size+extraLines.length+connectingLines.length,planeTotal=1+additionalPlanes.length;
+    document.querySelector('#summaryPlanes').textContent=planeTotal;
+    document.querySelector('#summaryLines').textContent=lineTotal;
+    document.querySelector('#summaryArea').textContent=selectedAreaSquareFeet?`${Math.round(selectedAreaSquareFeet).toLocaleString()} ft²`:'Not estimated';
+  }
+  render();
 }
 
 function render() {
@@ -722,6 +741,9 @@ function renderTiles(){
 }
 
 function clearRoofSelection(activateMagic=true) {
+  measurementComplete=false;canvas.classList.remove('measurement-complete');
+  document.querySelectorAll('[data-tool],.line-type,#addVertexBtn,#autoClassifyBtn,#undoBtn,#redoBtn,#togglePolygon').forEach(control=>{control.disabled=false;});
+  document.querySelector('#finishBtn').innerHTML='Finish measurement <span>→</span>';document.querySelector('#measurementSummary').hidden=true;
   points=[]; additionalPlanes=[]; extraLines=[]; connectingLines=[]; connectionStart=null; selectedLine=-1; selectedAreaSquareFeet=0;
   selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);
   document.querySelector('#selectionPulse').innerHTML='';
@@ -763,8 +785,14 @@ document.querySelector('#addressForm').addEventListener('submit',async event=>{
 });
 document.querySelector('#googleLink').addEventListener('click',()=>window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(document.querySelector('#address').value)}`,'_blank','noopener'));
 document.querySelector('#shareBtn').addEventListener('click',async()=>{const data={title:'Roofline measurement',text:'Review this roof measurement',url:location.href};if(navigator.share)await navigator.share(data);else{await navigator.clipboard?.writeText(location.href);toast('Share link copied');}});
-document.querySelector('#finishBtn').addEventListener('click',()=>{if(!points.length){toast('Select a roof before finishing');return;}document.querySelector('#progressValue').textContent='100%';document.querySelector('#progressBar').style.width='100%';toast('Measurement saved successfully');});
-document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}points=[];additionalPlanes=[];extraLines=[];connectingLines=[];connectionStart=null;selectedLine=-1;selectedAreaSquareFeet=0;selectionMask.getContext('2d').clearRect(0,0,selectionMask.width,selectionMask.height);render();toast('Roof selection removed');});
+document.querySelector('#finishBtn').addEventListener('click',()=>{
+  if(measurementComplete){setMeasurementComplete(false);toast('Editing reopened');return;}
+  if(points.length<3){toast('Select a roof before finishing');return;}
+  classifyRoofLines();setTool('pan');setMeasurementComplete(true);
+  const editor=document.querySelector('#editorPanel');editor.classList.add('sheet-expanded');document.querySelector('#sheetToggle').setAttribute('aria-expanded','true');
+  toast('Measurement complete — review the summary below');
+});
+document.querySelector('#undoBtn').addEventListener('click',()=>{if(!points.length){toast('Nothing to undo');return;}clearRoofSelection(false);toast('Roof selection removed');});
 document.querySelector('#redoBtn').addEventListener('click',()=>toast('Nothing to redo'));
 document.querySelector('#togglePolygon').addEventListener('click',event=>{
   if(!points.length){toast('Trace a roof before toggling its polygon');return;}

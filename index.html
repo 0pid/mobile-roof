@@ -111,6 +111,12 @@
             <div class="editor-actions"><button class="auto-classify" id="autoClassifyBtn" type="button">✦ Auto classify</button><button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button></div>
           </div>
           <p class="editor-help" id="editorHelp">Roof lines are classified automatically. Select a colored line to review it, or choose a category to correct it.</p>
+          <section class="measurement-summary" id="measurementSummary" aria-live="polite" hidden>
+            <div><strong id="summaryPlanes">0</strong><span>Roof planes</span></div>
+            <div><strong id="summaryLines">0</strong><span>Classified lines</span></div>
+            <div><strong id="summaryArea">—</strong><span>Estimated area</span></div>
+            <p><b>✓ Measurement ready</b><span>Select “Edit measurement” if you need to make another adjustment.</span></p>
+          </section>
           <div class="line-types" id="lineTypes">
             <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>Lower roof edge</small></span><b>✓</b></button>
             <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>
