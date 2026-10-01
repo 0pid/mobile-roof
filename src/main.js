@@ -430,6 +430,18 @@ function simplifyClosedPath(path, epsilon) {
   return simplifyOpenPath(arc(first,second),epsilon).slice(0,-1).concat(simplifyOpenPath(arc(second,first),epsilon).slice(0,-1));
 }
 
+function removeWeakStructuralCorners(path) {
+  const result=[...path];let changed=true;
+  while(changed&&result.length>3){changed=false;for(let index=0;index<result.length;index++){
+    const previous=result[(index-1+result.length)%result.length],point=result[index],next=result[(index+1)%result.length];
+    const first={x:point.x-previous.x,y:point.y-previous.y},second={x:next.x-point.x,y:next.y-point.y};
+    const lengths=Math.hypot(first.x,first.y)*Math.hypot(second.x,second.y);if(!lengths)continue;
+    const bend=Math.abs(first.x*second.y-first.y*second.x)/lengths,direction=(first.x*second.x+first.y*second.y)/lengths;
+    if(bend<.32&&direction>.65){result.splice(index,1);changed=true;break;}
+  }}
+  return result;
+}
+
 function fitStructuralLine(samples) {
   const center=samples.reduce((sum,point)=>({x:sum.x+point.x/samples.length,y:sum.y+point.y/samples.length}),{x:0,y:0});
   let xx=0,xy=0,yy=0;samples.forEach(point=>{const x=point.x-center.x,y=point.y-center.y;xx+=x*x;xy+=x*y;yy+=y*y;});
@@ -477,7 +489,7 @@ function traceRoofLines(stroke) {
     const pixel=(x,y)=>{const index=(Math.max(0,Math.min(height-1,y))*width+Math.max(0,Math.min(width-1,x)))*4;return [source[index],source[index+1],source[index+2]];};
     const edgeAt=(x,y)=>Math.max(colorDistance(pixel(x-2,y),pixel(x+2,y)),colorDistance(pixel(x,y-2),pixel(x,y+2)));
     const stageStroke=stroke.map(svgToStage);
-    const guide=simplifyClosedPath(stageStroke,Math.max(12,Math.min(width,height)*.018));
+    const guide=removeWeakStructuralCorners(simplifyClosedPath(stageStroke,Math.max(12,Math.min(width,height)*.018)));
     const interiorPalette=source?sampleInteriorPalette(guide,pixel,width,height):[];
     const paletteDistance=color=>interiorPalette.length?Math.min(...interiorPalette.map(sample=>colorDistance(color,sample))):0;
     const winding=guide.reduce((sum,point,index)=>{const next=guide[(index+1)%guide.length];return sum+point.x*next.y-next.x*point.y;},0);
@@ -485,20 +497,23 @@ function traceRoofLines(stroke) {
       const end=guide[(index+1)%guide.length],dx=end.x-start.x,dy=end.y-start.y,length=Math.hypot(dx,dy),normal={x:-dy/length,y:dx/length};
       const interiorNormal=winding>0?{x:-dy/length,y:dx/length}:{x:dy/length,y:-dx/length},samples=[];
       const sampleCount=Math.max(4,Math.ceil(length/5));
+      const searchRadius=Math.max(18,Math.min(36,Math.round(Math.min(width,height)*.045)));
       for(let sample=0;sample<=sampleCount;sample++){
         const base={x:start.x+dx*sample/sampleCount,y:start.y+dy*sample/sampleCount};
         if(!source){samples.push(base);continue;}
         let best={...base,score:-Infinity};
-        for(let offset=-14;offset<=14;offset+=2){
+        for(let offset=-searchRadius;offset<=searchRadius;offset+=2){
           const x=Math.round(base.x+normal.x*offset),y=Math.round(base.y+normal.y*offset);if(x<6||y<6||x>=width-6||y>=height-6)continue;
           const insideColor=pixel(Math.round(x+interiorNormal.x*5),Math.round(y+interiorNormal.y*5));
           const outsideColor=pixel(Math.round(x-interiorNormal.x*5),Math.round(y-interiorNormal.y*5));
           const insideMatch=Math.max(0,28-paletteDistance(insideColor)),outsideSeparation=Math.min(28,paletteDistance(outsideColor));
-          const score=edgeAt(x,y)+insideMatch*.8+outsideSeparation*.45-Math.abs(offset)*.85;if(score>best.score)best={x,y,score};
+          const score=edgeAt(x,y)+insideMatch*.8+outsideSeparation*.45-Math.abs(offset)*.45;if(score>best.score)best={x,y,score,offset};
         }
-        samples.push({x:best.x,y:best.y});
+        samples.push({x:best.x,y:best.y,offset:best.offset||0});
       }
-      return fitStructuralLine(samples);
+      const offsets=samples.map(sample=>sample.offset).sort((a,b)=>a-b),medianOffset=offsets[Math.floor(offsets.length/2)];
+      const consistent=samples.filter(sample=>Math.abs(sample.offset-medianOffset)<=7);
+      return fitStructuralLine(consistent.length>=3?consistent:samples);
     });
     const outline=guide.map((corner,index)=>intersectStructuralLines(fittedLines[(index-1+fittedLines.length)%fittedLines.length],fittedLines[index],corner));
     if(outline.length<3){pulse.innerHTML='';toast('Trace at least three roof edges');return;}
