@@ -53,7 +53,7 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'With Trace active, start or finish on an existing point or line to merge planes; trace-mode taps never select vertices.'
+    ? 'Trace beside an existing plane to reuse its full edge without gaps. Start or finish on existing geometry to join at one point.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
 }
 
@@ -150,9 +150,38 @@ function nearestExistingVertex(event, excluded=null, maximumDistance=22) {
   return nearest;
 }
 
+function snapAdjacentEdges(candidatePoints) {
+  const snapped=[...candidatePoints];
+  for(let candidateIndex=0;candidateIndex<snapped.length;candidateIndex++){
+    const first=svgToStage(snapped[candidateIndex]),second=svgToStage(snapped[(candidateIndex+1)%snapped.length]);
+    const candidateVector={x:second.x-first.x,y:second.y-first.y},candidateLength=Math.hypot(candidateVector.x,candidateVector.y);if(candidateLength<8)continue;
+    let match=null;
+    for(const plane of allPlanePointArrays())for(let edgeIndex=0;edgeIndex<plane.length;edgeIndex++){
+      const start=svgToStage(plane[edgeIndex]),end=svgToStage(plane[(edgeIndex+1)%plane.length]),dx=end.x-start.x,dy=end.y-start.y,lengthSquared=dx*dx+dy*dy,length=Math.sqrt(lengthSquared);if(!length)continue;
+      const alignment=Math.abs((candidateVector.x*dx+candidateVector.y*dy)/(candidateLength*length));if(alignment<.94)continue;
+      const project=point=>{const t=Math.max(0,Math.min(1,((point.x-start.x)*dx+(point.y-start.y)*dy)/lengthSquared));const projected={x:start.x+t*dx,y:start.y+t*dy};return {t,projected,distance:Math.hypot(point.x-projected.x,point.y-projected.y)};};
+      const firstProjection=project(first),secondProjection=project(second),distance=Math.max(firstProjection.distance,secondProjection.distance);
+      const overlap=Math.abs(firstProjection.t-secondProjection.t)*length;
+      if(distance<=28&&overlap>=Math.max(8,candidateLength*.35)&&(!match||distance<match.distance))match={plane,edgeIndex,firstProjection,secondProjection,distance};
+    }
+    if(!match)continue;
+    const sharedFor=projection=>{
+      if(projection.t<.06)return match.plane[match.edgeIndex];
+      if(projection.t>.94)return match.plane[(match.edgeIndex+1)%match.plane.length];
+      const existing=match.plane.find(point=>Math.hypot(svgToStage(point).x-projection.projected.x,svgToStage(point).y-projection.projected.y)<4);if(existing)return existing;
+      return stageToSvg(projection.projected);
+    };
+    const firstShared=sharedFor(match.firstProjection),secondShared=sharedFor(match.secondProjection);
+    const inserts=[{point:firstShared,t:match.firstProjection.t},{point:secondShared,t:match.secondProjection.t}].filter(item=>!match.plane.includes(item.point)).sort((a,b)=>a.t-b.t);
+    match.plane.splice(match.edgeIndex+1,0,...inserts.map(item=>item.point));
+    snapped[candidateIndex]=firstShared;snapped[(candidateIndex+1)%snapped.length]=secondShared;
+  }
+  return snapped;
+}
+
 function mergeTracedPolygon(candidatePoints) {
   const snapDistance=16,edgeDistance=18;
-  return candidatePoints.map(candidate=>{
+  return snapAdjacentEdges(candidatePoints).map(candidate=>{
     const candidateStage=svgToStage(candidate);
     for(const plane of allPlanePointArrays())for(const existing of plane)if(Math.hypot(svgToStage(existing).x-candidateStage.x,svgToStage(existing).y-candidateStage.y)<=snapDistance)return existing;
     let best=null;
