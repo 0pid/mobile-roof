@@ -20,6 +20,7 @@ const vertexLayer = document.querySelector('#vertexLayer');
 const roofFill = document.querySelector('#roofFill');
 const planeLayer = document.querySelector('#planeLayer');
 const selectionMask = document.querySelector('#selectionMask');
+const vertexMagnifier = document.querySelector('#vertexMagnifier');
 const imageryCanvas = document.createElement('canvas');
 
 function svgEl(name, attrs={}) {
@@ -38,8 +39,8 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Drag any point to adjust the outline, or add a vertex for more detail. Then select a line to classify it.'
-    : 'Choose the magic lasso, then drag across a roof surface to paint a sample. Add, remove, or drag vertices to refine the result.';
+    ? 'Choose the move vertex tool to drag points, or use add/remove for more detail. Then select a line to classify it.'
+    : 'Choose the magic lasso, then paint a roof sample. Use the dedicated vertex tools to refine the result.';
 }
 
 function render() {
@@ -88,10 +89,9 @@ function render() {
         extraLines=extraLines.filter(line=>line.a!==index&&line.b!==index).map(line=>({ ...line,a:line.a>index?line.a-1:line.a,b:line.b>index?line.b-1:line.b }));
         selectedLine=-1; render(); toast('Vertex removed'); return;
       }
-      dragging=index; el.setPointerCapture(event.pointerId); render();
+      if(activeTool!=='move'){toast('Choose the move vertex tool to drag points');return;}
+      dragging=index; canvas.setPointerCapture(event.pointerId); canvas.classList.add('moving-vertex'); showVertexMagnifier(event); render();
     });
-    el.addEventListener('pointermove', event => { if(dragging!==index)return; const next=toSvg(event); points[index]={x:next.x,y:next.y}; render(); });
-    el.addEventListener('pointerup', () => { dragging=null; render(); toast('Vertex updated'); });
     vertexLayer.append(el);
   });
   updateProgress();
@@ -118,8 +118,24 @@ function setTool(tool) {
   document.querySelectorAll('[data-tool]').forEach(button => button.classList.toggle('active',button.dataset.tool===tool));
   canvas.classList.toggle('adding-vertex', tool === 'vertex');
   canvas.classList.toggle('removing-vertex', tool === 'remove');
+  canvas.classList.toggle('move-vertex-tool', tool === 'move');
   canvas.classList.toggle('pan-tool', tool === 'pan');
 }
+
+function showVertexMagnifier(event) {
+  const stage=document.querySelector('#mapStage'), bounds=stage.getBoundingClientRect();
+  const x=event.clientX-bounds.left, y=event.clientY-bounds.top, size=112, sampleSize=46;
+  const context=vertexMagnifier.getContext('2d');
+  context.clearRect(0,0,size,size);
+  context.drawImage(imageryCanvas,x-sampleSize/2,y-sampleSize/2,sampleSize,sampleSize,0,0,size,size);
+  context.strokeStyle='#efff9b'; context.lineWidth=2;
+  context.beginPath(); context.moveTo(size/2-11,size/2); context.lineTo(size/2+11,size/2); context.moveTo(size/2,size/2-11); context.lineTo(size/2,size/2+11); context.stroke();
+  const left=Math.max(8,Math.min(stage.clientWidth-size-8,x+28));
+  const top=Math.max(8,Math.min(stage.clientHeight-size-8,y-size-34));
+  vertexMagnifier.style.left=`${left}px`; vertexMagnifier.style.top=`${top}px`; vertexMagnifier.classList.add('visible');
+}
+
+function hideVertexMagnifier(){vertexMagnifier.classList.remove('visible');canvas.classList.remove('moving-vertex');}
 
 function colorDistance(a, b) {
   const red = a[0]-b[0], green = a[1]-b[1], blue = a[2]-b[2];
@@ -319,6 +335,9 @@ canvas.addEventListener('pointerdown', event => {
   document.querySelector('#magicTip span').textContent='Release when the roof surface is covered.';
 });
 canvas.addEventListener('pointermove', event=>{
+  if(dragging!==null && activeTool==='move') {
+    const next=toSvg(event); points[dragging]={x:next.x,y:next.y}; render(); showVertexMagnifier(event); return;
+  }
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     document.querySelector('#tileLayer').style.transform=`translate(${offsetX}px,${offsetY}px)`;
@@ -327,6 +346,11 @@ canvas.addEventListener('pointermove', event=>{
   if(painting)appendPaintPoint(event);
 });
 canvas.addEventListener('pointerup', event=>{
+  if(dragging!==null) {
+    dragging=null; hideVertexMagnifier();
+    if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
+    render(); toast('Vertex updated'); return;
+  }
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     mapCenter={lon:xToLon(panGesture.centerX-offsetX/256,mapZoom),lat:yToLat(panGesture.centerY-offsetY/256,mapZoom)};
@@ -338,7 +362,7 @@ canvas.addEventListener('pointerup', event=>{
   if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
   magicSelect([...paintPoints]);
 });
-canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];panGesture=null;canvas.classList.remove('panning');document.querySelector('#tileLayer').style.transform='';document.querySelector('#selectionPulse').innerHTML='';});
+canvas.addEventListener('pointercancel',()=>{painting=false;paintPoints=[];panGesture=null;dragging=null;hideVertexMagnifier();canvas.classList.remove('panning');document.querySelector('#tileLayer').style.transform='';document.querySelector('#selectionPulse').innerHTML='';});
 
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
@@ -445,7 +469,7 @@ document.querySelector('#sheetToggle').addEventListener('click',event=>{
 });
 document.querySelectorAll('[data-tool]').forEach(button=>button.addEventListener('click',()=>{
   setTool(button.dataset.tool);
-  const names={magic:'Magic lasso',vertex:'Add vertex',remove:'Remove vertex',pan:'Pan'};
+  const names={magic:'Magic lasso',vertex:'Add vertex',remove:'Remove vertex',move:'Move vertex',pan:'Pan'};
   toast(`${names[button.dataset.tool]} tool active`);
 }));
 window.addEventListener('resize',renderTiles);

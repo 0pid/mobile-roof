@@ -66,6 +66,7 @@
             <button class="active magic-tool" data-tool="magic" aria-label="Magic lasso tool" title="Magic lasso">✦</button>
             <button data-tool="vertex" aria-label="Add vertex tool" title="Add vertex">＋</button>
             <button data-tool="remove" aria-label="Remove vertex tool" title="Remove vertex">−</button>
+            <button data-tool="move" aria-label="Move vertex tool" title="Move vertex">✥</button>
             <button data-tool="pan" aria-label="Pan tool" title="Pan">✋</button>
             <span></span>
             <button id="undoBtn" aria-label="Undo">↶</button>
@@ -79,6 +80,7 @@
           </div>
 
           <canvas class="selection-mask" id="selectionMask" aria-hidden="true"></canvas>
+          <canvas class="vertex-magnifier" id="vertexMagnifier" width="112" height="112" aria-hidden="true"></canvas>
           <svg class="roof-canvas" id="roofCanvas" viewBox="0 0 900 650" role="img" aria-label="Editable roof outline">
             <defs>
               <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity=".24"/></filter>
@@ -106,7 +108,7 @@
             <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
             <button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button>
           </div>
-          <p class="editor-help" id="editorHelp">Choose the magic lasso, then drag across a roof surface in the aerial image. Add, remove, or drag vertices to refine the result.</p>
+          <p class="editor-help" id="editorHelp">Choose the magic lasso, then drag across a roof surface in the aerial image. Use the add, remove, or move vertex tools to refine the result.</p>
           <div class="line-types" id="lineTypes">
             <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>34.2 ft selected</small></span><b>✓</b></button>
             <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>
