@@ -594,8 +594,12 @@ canvas.addEventListener('pointerup', event=>{
   if(panGesture && event.pointerId===panGesture.pointerId) {
     const offsetX=event.clientX-panGesture.startX, offsetY=event.clientY-panGesture.startY;
     mapCenter={lon:xToLon(panGesture.centerX-offsetX/256,mapZoom),lat:yToLat(panGesture.centerY-offsetY/256,mapZoom)};
-    const translatePoint=point=>{const stagePoint=svgToStage(point),translated=stageToSvg({x:stagePoint.x+offsetX,y:stagePoint.y+offsetY});point.x=translated.x;point.y=translated.y;return point;};
-    points=points.map(translatePoint); additionalPlanes=additionalPlanes.map(plane=>({...plane,points:plane.points.map(translatePoint)}));
+    const translatedPoints=new Set();
+    allPlanePointArrays().forEach(plane=>plane.forEach(point=>{
+      if(translatedPoints.has(point))return;
+      const stagePoint=svgToStage(point),translated=stageToSvg({x:stagePoint.x+offsetX,y:stagePoint.y+offsetY});
+      point.x=translated.x;point.y=translated.y;translatedPoints.add(point);
+    }));
     if(selectionMask.width&&selectionMask.height){const copy=document.createElement('canvas');copy.width=selectionMask.width;copy.height=selectionMask.height;copy.getContext('2d').drawImage(selectionMask,0,0);const context=selectionMask.getContext('2d');context.clearRect(0,0,selectionMask.width,selectionMask.height);context.drawImage(copy,offsetX,offsetY);}
     panGesture=null; canvas.classList.remove('panning'); document.querySelector('#tileLayer').style.transform=''; selectionMask.style.transform='';
     if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
