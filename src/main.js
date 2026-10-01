@@ -224,12 +224,37 @@ function fillEnclosedMaskAreas(mask, cols, rows) {
   return filled;
 }
 
+function buildPaintIntentMask(seeds, cols, rows) {
+  const intent=new Uint8Array(cols*rows);
+  const paint=(x,y)=>{
+    for(let offsetY=-2;offsetY<=2;offsetY++)for(let offsetX=-2;offsetX<=2;offsetX++)if(offsetX*offsetX+offsetY*offsetY<=4) {
+      const nextX=x+offsetX,nextY=y+offsetY;if(nextX>=0&&nextY>=0&&nextX<cols&&nextY<rows)intent[nextY*cols+nextX]=1;
+    }
+  };
+  const connect=(from,to)=>{
+    const steps=Math.max(Math.abs(to.x-from.x),Math.abs(to.y-from.y),1);
+    for(let step=0;step<=steps;step++)paint(Math.round(from.x+(to.x-from.x)*step/steps),Math.round(from.y+(to.y-from.y)*step/steps));
+  };
+  seeds.forEach((seed,index)=>{paint(seed.x,seed.y);if(index)connect(seeds[index-1],seed);});
+  const spanX=Math.max(...seeds.map(seed=>seed.x))-Math.min(...seeds.map(seed=>seed.x));
+  const spanY=Math.max(...seeds.map(seed=>seed.y))-Math.min(...seeds.map(seed=>seed.y));
+  if(seeds.length>2&&Math.hypot(seeds[0].x-seeds.at(-1).x,seeds[0].y-seeds.at(-1).y)<=Math.max(7,Math.max(spanX,spanY)*.22))connect(seeds.at(-1),seeds[0]);
+  fillEnclosedMaskAreas(intent,cols,rows);
+  const expansion=Math.max(5,Math.min(14,Math.round(Math.max(1,Math.min(spanX||spanY,spanY||spanX))*.2)));
+  const distance=new Int16Array(intent.length);distance.fill(-1);
+  const queue=new Int32Array(intent.length);let head=0,tail=0;
+  intent.forEach((value,index)=>{if(value){distance[index]=0;queue[tail++]=index;}});
+  while(head<tail){const index=queue[head++],x=index%cols,y=Math.floor(index/cols);if(distance[index]>=expansion)continue;for(const next of [index-1,index+1,index-cols,index+cols])if(next>=0&&next<intent.length&&distance[next]===-1&&Math.abs(next%cols-x)+Math.abs(Math.floor(next/cols)-y)===1){distance[next]=distance[index]+1;queue[tail++]=next;}}
+  return Uint8Array.from(distance,value=>value>=0?1:0);
+}
+
 function tracePaintedRegion(stagePoints, tolerance=34) {
   const width=imageryCanvas.width, height=imageryCanvas.height;
   if (!width || !height || !stagePoints.length) return null;
   const source=imageryCanvas.getContext('2d',{willReadFrequently:true}).getImageData(0,0,width,height).data;
   const step=3, cols=Math.ceil(width/step), rows=Math.ceil(height/step);
   const seeds=stagePoints.map(point=>({x:Math.max(0,Math.min(cols-1,Math.floor(point.x/step))),y:Math.max(0,Math.min(rows-1,Math.floor(point.y/step)))}));
+  const allowedMask=buildPaintIntentMask(seeds,cols,rows);
   const pixelAt=(x,y) => { const index=(Math.min(height-1,y*step)*width+Math.min(width-1,x*step))*4; return [source[index],source[index+1],source[index+2],source[index+3]]; };
   const edgeStrengthAt=(x,y)=>Math.max(
     colorDistance(pixelAt(Math.max(0,x-1),y),pixelAt(Math.min(cols-1,x+1),y)),
@@ -244,8 +269,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
   const queueX=new Int32Array(cols*rows), queueY=new Int32Array(cols*rows); let head=0,tail=0;
   seeds.forEach(seed=>{const index=seed.y*cols+seed.x;if(!visited[index]){visited[index]=1;queueX[tail]=seed.x;queueY[tail++]=seed.y;}});
   let count=0, minX=Math.min(...seeds.map(seed=>seed.x)), maxX=Math.max(...seeds.map(seed=>seed.x)), minY=Math.min(...seeds.map(seed=>seed.y)), maxY=Math.max(...seeds.map(seed=>seed.y));
-  const paintedBoxArea=(maxX-minX+1)*(maxY-minY+1);
-  const maximumPixels=Math.floor(Math.min(cols*rows*.4,Math.max(cols*rows*.12,paintedBoxArea*3)));
+  const maximumPixels=allowedMask.reduce((sum,value)=>sum+value,0);
   while(head<tail) {
     const x=queueX[head], y=queueY[head++], current=pixelAt(x,y), index=y*cols+x;
     mask[index]=1; count++;
@@ -257,7 +281,7 @@ function tracePaintedRegion(stagePoints, tolerance=34) {
       const nextIndex=nextY*cols+nextX;
       const nextColor=pixelAt(nextX,nextY);
       const crossesEdge=edgeStrengthAt(nextX,nextY)>19 && colorDistance(current,nextColor)>6;
-      if(!visited[nextIndex] && matchesPalette(nextColor) && !crossesEdge){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
+      if(!visited[nextIndex] && allowedMask[nextIndex] && matchesPalette(nextColor) && !crossesEdge){visited[nextIndex]=1;queueX[tail]=nextX;queueY[tail++]=nextY;}
     }
   }
   count+=fillEnclosedMaskAreas(mask,cols,rows);
@@ -442,7 +466,7 @@ function showProperty(address) {
   clearRoofSelection();
   document.querySelector('#magicTip').classList.remove('hidden');
   document.querySelector('#magicTip strong').textContent='Paint across a roof with the magic lasso';
-  document.querySelector('#magicTip span').textContent='Everything you paint is roof; we’ll expand and snap to its outer edge.';
+  document.querySelector('#magicTip span').textContent='Paint the roof’s shape; we’ll preserve it and snap nearby points to visible edges.';
   if(window.matchMedia('(max-width: 850px)').matches) {
     document.querySelector('#sidePanel').classList.add('mobile-collapsed');
     document.querySelector('#panelToggle').setAttribute('aria-expanded','false');
