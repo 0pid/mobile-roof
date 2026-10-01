@@ -9,6 +9,8 @@ let lastVertexTap = null;
 let activeTool = 'magic';
 let painting = false;
 let paintPoints = [];
+let traceStartAnchor = null;
+let traceEndAnchor = null;
 let panGesture = null;
 let temporaryPanTool = null;
 let polygonVisible = true;
@@ -51,7 +53,7 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Trace into existing edges to merge planes, connect separate vertices, or drag vertices together to merge them.'
+    ? 'With Trace active, start or finish on an existing point or line to merge planes; trace-mode taps never select vertices.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
 }
 
@@ -66,6 +68,7 @@ function render() {
     const polygon=svgEl('polygon',{points:plane.points.map(point=>`${point.x},${point.y}`).join(' '),class:'detected-plane'});
     polygon.style.opacity=String(.35+plane.confidence*.45);
     polygon.addEventListener('pointerdown',event=>{
+      if(activeTool==='trace')return;
       event.stopPropagation();
       additionalPlanes[index]={points:[...points],confidence:1}; points=plane.points; selectedLine=-1; render(); toast('Roof plane selected for editing');
     });
@@ -85,6 +88,7 @@ function render() {
     const el = svgEl('line', {x1:start.x,y1:start.y,x2:end.x,y2:end.y,class:`roof-line ${index===selectedLine?'selected':''} ${index>=points.length?'internal':''}`});
     if (index === selectedLine) el.style.stroke = colors[line.type];
     el.addEventListener('pointerdown', event => {
+      if(activeTool==='trace')return;
       if(line.connection){event.stopPropagation();selectedLine=index;render();selectType(line.type);return;}
       if (activeTool === 'vertex' && index < points.length) {
         event.stopPropagation();
@@ -103,6 +107,11 @@ function render() {
     const el = svgEl('circle', {cx:point.x,cy:point.y,r:8,class:`vertex ${dragging===index?'selected':''}`});
     el.addEventListener('pointerdown', event => {
       event.preventDefault(); event.stopPropagation();
+      if(activeTool==='trace'){
+        traceStartAnchor=point;traceEndAnchor=null;painting=true;paintPoints=[{x:point.x,y:point.y}];canvas.setPointerCapture(event.pointerId);
+        document.querySelector('#selectionPulse').innerHTML=`<polyline class="paint-stroke trace-stroke" points="${point.x},${point.y}"/>`;
+        document.querySelector('#magicTip strong').textContent='Trace from the connected vertex';document.querySelector('#magicTip span').textContent='Finish at another existing point or line to merge the planes.';return;
+      }
       if(activeTool==='line'){pickConnectionVertex(point);return;}
       if(activeTool==='remove') {
         if(points.length<=3){toast('A roof needs at least three vertices');return;}
@@ -134,8 +143,15 @@ function pickConnectionVertex(point) {
 
 function allPlanePointArrays(){return [points,...additionalPlanes.map(plane=>plane.points)];}
 
+function nearestExistingVertex(event, excluded=null, maximumDistance=22) {
+  const eventStage={x:event.clientX-document.querySelector('#mapStage').getBoundingClientRect().left,y:event.clientY-document.querySelector('#mapStage').getBoundingClientRect().top};
+  let nearest=null,distance=maximumDistance;
+  for(const plane of allPlanePointArrays())for(const point of plane)if(point!==excluded){const stage=svgToStage(point),candidate=Math.hypot(stage.x-eventStage.x,stage.y-eventStage.y);if(candidate<distance){nearest=point;distance=candidate;}}
+  return nearest;
+}
+
 function mergeTracedPolygon(candidatePoints) {
-  const snapDistance=12,edgeDistance=10;
+  const snapDistance=16,edgeDistance=18;
   return candidatePoints.map(candidate=>{
     const candidateStage=svgToStage(candidate);
     for(const plane of allPlanePointArrays())for(const existing of plane)if(Math.hypot(svgToStage(existing).x-candidateStage.x,svgToStage(existing).y-candidateStage.y)<=snapDistance)return existing;
@@ -517,6 +533,11 @@ function traceRoofLines(stroke) {
     });
     const outline=guide.map((corner,index)=>intersectStructuralLines(fittedLines[(index-1+fittedLines.length)%fittedLines.length],fittedLines[index],corner));
     if(outline.length<3){pulse.innerHTML='';toast('Trace at least three roof edges');return;}
+    for(const anchor of [traceStartAnchor,traceEndAnchor].filter(Boolean)){
+      const anchorStage=svgToStage(anchor);let nearestIndex=0;
+      outline.forEach((point,index)=>{if(Math.hypot(point.x-anchorStage.x,point.y-anchorStage.y)<Math.hypot(outline[nearestIndex].x-anchorStage.x,outline[nearestIndex].y-anchorStage.y))nearestIndex=index;});
+      outline[nearestIndex]=anchorStage;
+    }
     const mergedOutline=mergeTracedPolygon(outline.map(stageToSvg));
     if(points.length)additionalPlanes.push({points:[...points],confidence:1});
     points=mergedOutline;extraLines=[];selectedLine=0;
@@ -526,7 +547,7 @@ function traceRoofLines(stroke) {
     pulse.innerHTML='';render();
     document.querySelector('#magicTip strong').textContent='Roof trace snapped';
     document.querySelector('#magicTip span').textContent=`${points.length} edge vertices found near your traced line.`;
-    toast('Trace snapped to nearby roof edges');
+    traceStartAnchor=null;traceEndAnchor=null;toast('Trace snapped to nearby roof edges');
   },350);
 }
 
@@ -548,7 +569,7 @@ canvas.addEventListener('pointerdown', event => {
     return;
   }
   if(!['magic','trace'].includes(activeTool) || (activeTool==='magic'&&points.length))return;
-  event.preventDefault(); painting=true; paintPoints=[]; canvas.setPointerCapture(event.pointerId); appendPaintPoint(event);
+  event.preventDefault(); painting=true; paintPoints=[];if(activeTool==='trace'){traceStartAnchor=null;traceEndAnchor=null;}canvas.setPointerCapture(event.pointerId); appendPaintPoint(event);
   document.querySelector('#magicTip strong').textContent=activeTool==='trace'?'Trace along the roof border':'Paint across the roof plane';
   document.querySelector('#magicTip span').textContent=activeTool==='trace'?'Follow the visible roof lines and release to snap.':'Release when the roof surface is covered.';
 });
@@ -584,6 +605,7 @@ canvas.addEventListener('pointerup', event=>{
     return;
   }
   if(!painting)return; appendPaintPoint(event); painting=false;
+  if(activeTool==='trace')traceEndAnchor=nearestExistingVertex(event,traceStartAnchor);
   if(canvas.hasPointerCapture(event.pointerId))canvas.releasePointerCapture(event.pointerId);
   const stroke=[...paintPoints]; activeTool==='trace'?traceRoofLines(stroke):magicSelect(stroke);
 });
