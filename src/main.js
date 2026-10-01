@@ -20,6 +20,8 @@ let tileRenderId = 0;
 const loadedTiles = [];
 let mapZoom = 20;
 const colors = { Eave:'#e8f880', Ridge:'#e4c557', Hip:'#6db5a4', Valley:'#f07d69', Rake:'#728dc4' };
+const lineClassifications = new Map();
+const lineTypeDescriptions = { Eave:'Lower roof edge', Ridge:'Shared roof peak', Hip:'Outside slope', Valley:'Inside slope', Rake:'Sloped end edge' };
 const canvas = document.querySelector('#roofCanvas');
 const lineLayer = document.querySelector('#lineLayer');
 const vertexLayer = document.querySelector('#vertexLayer');
@@ -35,6 +37,36 @@ function pointId(point){if(!pointIds.has(point))pointIds.set(point,nextPointId++
 function edgeKey(first,second){const ids=[pointId(first),pointId(second)].sort((a,b)=>a-b);return `${ids[0]}:${ids[1]}`;}
 function boundaryEdgeCounts(){const counts=new Map();allPlanePointArrays().forEach(plane=>plane.forEach((point,index)=>{const key=edgeKey(point,plane[(index+1)%plane.length]);counts.set(key,(counts.get(key)||0)+1);}));return counts;}
 function boundaryEdgeKeys(){return new Set(boundaryEdgeCounts().keys());}
+
+function edgeAngle(first,second){const a=svgToStage(first),b=svgToStage(second);return Math.atan2(b.y-a.y,b.x-a.x);}
+function parallelAngleDifference(first,second){let difference=Math.abs(first-second)%Math.PI;return Math.min(difference,Math.PI-difference);}
+function setAutomaticClassification(key,type,confidence,force=false){
+  const current=lineClassifications.get(key);
+  if(force||!current||current.source==='auto')lineClassifications.set(key,{type,confidence,source:'auto'});
+}
+function classifyRoofLines(force=false){
+  const counts=boundaryEdgeCounts(),validKeys=new Set();
+  allPlanePointArrays().filter(plane=>plane.length>2).forEach(plane=>{
+    const edges=plane.map((point,index)=>{const next=plane[(index+1)%plane.length],a=svgToStage(point),b=svgToStage(next);return {point,next,key:edgeKey(point,next),length:Math.hypot(b.x-a.x,b.y-a.y),angle:edgeAngle(point,next)};});
+    const exterior=edges.filter(edge=>counts.get(edge.key)===1),reference=exterior.reduce((longest,edge)=>edge.length>(longest?.length||0)?edge:longest,null);
+    edges.forEach(edge=>{
+      validKeys.add(edge.key);
+      if(counts.get(edge.key)>1){setAutomaticClassification(edge.key,'Ridge',.94,force);return;}
+      if(plane.length===3||!reference){setAutomaticClassification(edge.key,'Eave',.7,force);return;}
+      const difference=parallelAngleDifference(edge.angle,reference.angle),isEave=difference<Math.PI/7;
+      setAutomaticClassification(edge.key,isEave?'Eave':'Rake',isEave?.78:.66,force);
+    });
+  });
+  extraLines.forEach(line=>{const key=edgeKey(points[line.a],points[line.b]);validKeys.add(key);setAutomaticClassification(key,'Hip',.62,force);if(force||!line.manual)line.type=lineClassifications.get(key).type;});
+  connectingLines.forEach(line=>{const key=edgeKey(line.a,line.b);validKeys.add(key);setAutomaticClassification(key,'Ridge',.82,force);if(force||!line.manual)line.type=lineClassifications.get(key).type;});
+  for(const key of lineClassifications.keys())if(!validKeys.has(key))lineClassifications.delete(key);
+}
+function classifiedType(first,second,fallback='Eave'){return lineClassifications.get(edgeKey(first,second))?.type||fallback;}
+function updateClassificationSummary(){
+  const totals={Eave:0,Ridge:0,Hip:0,Valley:0,Rake:0};
+  lineClassifications.forEach(classification=>totals[classification.type]++);
+  document.querySelectorAll('.line-type').forEach(button=>{const type=button.dataset.type,count=totals[type];button.querySelector('small').textContent=count?`${count} ${count===1?'line':'lines'} · detected`:lineTypeDescriptions[type];});
+}
 
 function svgEl(name, attrs={}) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', name);
@@ -53,11 +85,12 @@ function updateProgress() {
   document.querySelector('#stepLabel').textContent = hasRoof ? 'STEP 2 OF 3' : 'STEP 1 OF 3';
   document.querySelector('#editorTitle').textContent = hasRoof ? 'Refine roof outline' : 'Select the roof';
   document.querySelector('#editorHelp').textContent = hasRoof
-    ? 'Trace beside an existing plane to reuse its full edge without gaps. Start or finish on existing geometry to join at one point.'
+    ? 'Roof lines are classified automatically. Select a colored line to review it, or choose a category to correct it.'
     : 'Paint with the magic lasso, or trace directly over visible roof lines. Use the vertex tools to refine the result.';
 }
 
 function render() {
+  classifyRoofLines();
   const pointString = points.map(point => `${point.x},${point.y}`).join(' ');
   roofFill.setAttribute('points', pointString);
   document.querySelector('.roof-shadow').setAttribute('points', pointString);
@@ -73,20 +106,20 @@ function render() {
       additionalPlanes[index]={points:[...points],confidence:1}; points=plane.points; selectedLine=-1; render(); toast('Roof plane selected for editing');
     });
     planeLayer.append(polygon);
+    plane.points.forEach((point,edgeIndex)=>{const next=plane.points[(edgeIndex+1)%plane.points.length],type=classifiedType(point,next);const line=svgEl('line',{x1:point.x,y1:point.y,x2:next.x,y2:next.y,class:'roof-line classified-plane-line'});line.style.stroke=colors[type];line.setAttribute('data-line-type',type);planeLayer.append(line);});
     if(activeTool==='line')plane.points.forEach(point=>{
       const vertex=svgEl('circle',{cx:point.x,cy:point.y,r:7,class:'vertex secondary-vertex'});
       vertex.addEventListener('pointerdown',event=>{event.preventDefault();event.stopPropagation();pickConnectionVertex(point);});
       planeLayer.append(vertex);
     });
   });
-  const edgeCounts=boundaryEdgeCounts();
   const lines = points.length > 2
-    ? points.map((point,index) => ({a:index,b:(index+1)%points.length,type:edgeCounts.get(edgeKey(point,points[(index+1)%points.length]))>1?'Ridge':'Eave'})).concat(extraLines)
+    ? points.map((point,index) => ({a:index,b:(index+1)%points.length,type:classifiedType(point,points[(index+1)%points.length])})).concat(extraLines)
     : [];
   lines.concat(connectingLines.map(line=>({pointA:line.a,pointB:line.b,type:line.type,connection:true}))).forEach((line,index) => {
     const start=line.connection?line.pointA:points[line.a],end=line.connection?line.pointB:points[line.b];
     const el = svgEl('line', {x1:start.x,y1:start.y,x2:end.x,y2:end.y,class:`roof-line ${index===selectedLine?'selected':''} ${index>=points.length?'internal':''}`});
-    if (index === selectedLine) el.style.stroke = colors[line.type];
+    el.style.stroke = colors[line.type]; el.setAttribute('data-line-type',line.type);
     el.addEventListener('pointerdown', event => {
       if(activeTool==='trace')return;
       if(line.connection){event.stopPropagation();selectedLine=index;render();selectType(line.type);return;}
@@ -131,6 +164,7 @@ function render() {
     vertexLayer.append(el);
   });
   updateProgress();
+  updateClassificationSummary();
 }
 
 function pickConnectionVertex(point) {
@@ -648,10 +682,12 @@ canvas.addEventListener('auxclick',event=>{if(event.button===1)event.preventDefa
 document.querySelectorAll('.line-type').forEach(button => button.addEventListener('click', () => {
   if (selectedLine < 0 || !points.length) { toast('Select the roof first'); return; }
   const type=button.dataset.type;
-  if(selectedLine>=points.length+extraLines.length)connectingLines[selectedLine-points.length-extraLines.length].type=type;
-  else if(selectedLine>=points.length)extraLines[selectedLine-points.length].type=type;
+  if(selectedLine>=points.length+extraLines.length){const line=connectingLines[selectedLine-points.length-extraLines.length];line.type=type;line.manual=true;lineClassifications.set(edgeKey(line.a,line.b),{type,confidence:1,source:'manual'});}
+  else if(selectedLine>=points.length){const line=extraLines[selectedLine-points.length];line.type=type;line.manual=true;lineClassifications.set(edgeKey(points[line.a],points[line.b]),{type,confidence:1,source:'manual'});}
+  else {const start=points[selectedLine],end=points[(selectedLine+1)%points.length];lineClassifications.set(edgeKey(start,end),{type,confidence:1,source:'manual'});}
   selectType(type); render(); toast(`Line classified as ${type}`);
 }));
+document.querySelector('#autoClassifyBtn').addEventListener('click',()=>{classifyRoofLines(true);selectedLine=-1;render();toast('Roof lines automatically classified — select any line to review');});
 document.querySelector('#dismissTip').addEventListener('click',()=>document.querySelector('#magicTip').classList.add('hidden'));
 document.querySelector('#addVertexBtn').addEventListener('click',()=>{ if(!points.length){toast('Use the magic lasso on a roof first');return;} setTool('vertex');toast('Tap an outline edge to add a vertex'); });
 

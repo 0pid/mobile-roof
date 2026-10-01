@@ -108,11 +108,11 @@
           <button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="editorPanel"><i></i><span>Roof tools &amp; steps</span><b>⌃</b></button>
           <div class="editor-heading">
             <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
-            <button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button>
+            <div class="editor-actions"><button class="auto-classify" id="autoClassifyBtn" type="button">✦ Auto classify</button><button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button></div>
           </div>
-          <p class="editor-help" id="editorHelp">Trace beside an existing plane to reuse its full edge without gaps. Start or finish on existing geometry to join at one point.</p>
+          <p class="editor-help" id="editorHelp">Roof lines are classified automatically. Select a colored line to review it, or choose a category to correct it.</p>
           <div class="line-types" id="lineTypes">
-            <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>34.2 ft selected</small></span><b>✓</b></button>
+            <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>Lower roof edge</small></span><b>✓</b></button>
             <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>
             <button class="line-type" data-type="Hip"><i class="swatch hip"></i><span><strong>Hip</strong><small>Outside slope</small></span><b>H</b></button>
             <button class="line-type" data-type="Valley"><i class="swatch valley"></i><span><strong>Valley</strong><small>Inside slope</small></span><b>V</b></button>

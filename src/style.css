@@ -24,3 +24,4 @@ body{overflow:hidden}
 
 .vertex-magnifier{display:none;position:absolute;z-index:7;width:112px;height:112px;border:3px solid #fff;border-radius:50%;background:#526158;box-shadow:0 8px 26px #14271d77,0 0 0 2px #78922e;pointer-events:none}.vertex-magnifier.visible{display:block}.vertex{cursor:pointer}.roof-canvas.move-vertex-tool .vertex{cursor:grab}.roof-canvas.moving-vertex,.roof-canvas.moving-vertex .vertex{cursor:grabbing}
 .paint-stroke.trace-stroke{stroke:#fff;stroke-width:6;opacity:.9;filter:drop-shadow(0 0 2px #244c3a)}
+.editor-actions{display:flex;align-items:center;gap:8px}.auto-classify{background:#f4f8e7;color:#52692c;border:1px solid #cddc91;border-radius:9px;padding:10px 12px;font:700 10px inherit;cursor:pointer;white-space:nowrap}.auto-classify:hover{background:#eaf4bd}.classified-plane-line{pointer-events:none;stroke-width:4}@media(max-width:600px){.editor-actions{align-items:stretch;flex-direction:column-reverse}.auto-classify{padding:7px 9px}}
