@@ -3,131 +3,97 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#f7f8f6" />
-    <title>Roofline — Roof measurement, simplified</title>
+    <meta name="theme-color" content="#f7f7f2" />
+    <title>Solo — Your home energy agent</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/src/style.css" />
   </head>
   <body>
-    <header class="app-header">
-      <a class="brand" href="#" aria-label="Roofline home">
-        <span class="brand-mark"><i></i><i></i><i></i></span>
-        <span>roofline</span>
-      </a>
-      <div class="header-actions">
-        <button class="help-button" aria-label="Help">?</button>
-        <button class="share-button" id="shareBtn"><span class="share-icon">⌃</span> Share</button>
-      </div>
-    </header>
+    <svg class="icon-library" aria-hidden="true"><defs>
+      <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-5v-7H9v7H4a1 1 0 0 1-1-1z"/></symbol>
+      <symbol id="i-chat" viewBox="0 0 24 24"><path d="M20 15a3 3 0 0 1-3 3H9l-5 3v-6a3 3 0 0 1-1-2V7a3 3 0 0 1 3-3h11a3 3 0 0 1 3 3z"/></symbol>
+      <symbol id="i-plan" viewBox="0 0 24 24"><path d="M5 3v18M5 7h11l3 4-3 4H5"/></symbol>
+      <symbol id="i-doc" viewBox="0 0 24 24"><path d="M6 2h8l5 5v15H6zM14 2v6h5M9 13h6M9 17h6"/></symbol>
+      <symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 22a8 8 0 0 1 16 0"/></symbol>
+      <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+      <symbol id="i-bolt" viewBox="0 0 24 24"><path d="m13 2-8 12h7l-1 8 8-12h-7z"/></symbol>
+      <symbol id="i-roof" viewBox="0 0 24 24"><path d="m2 12 10-8 10 8M5 11v9h14v-9M8 14h8"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M14 7l5 5-5 5"/></symbol>
+    </defs></svg>
 
-    <main class="app-shell">
-      <aside class="side-panel" id="sidePanel">
-        <button class="panel-toggle" id="panelToggle" type="button" aria-expanded="true" aria-controls="sidePanel"><span>⌕</span><b>Property</b></button>
-        <div class="panel-top">
-          <div class="eyebrow"><span class="status-dot"></span> New measurement</div>
-          <h1>Trace the roof.<br><em>We’ll find the edges.</em></h1>
-          <p class="intro">Search for a property, then paint across the roof in the aerial image. The magic lasso follows your sampled surfaces to create an editable outline.</p>
-
-          <form class="search-card" id="addressForm">
-            <label for="address">Property address</label>
-            <div class="search-row">
-              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5"></circle><path d="m16 16 4 4"></path></svg>
-              <input id="address" value="1227 West Cedar Canyons Road" autocomplete="street-address" />
-              <button type="submit" aria-label="Find address">→</button>
-            </div>
-            <button type="button" class="google-link" id="googleLink"><span class="google-g">G</span> Open in Google Maps <span>↗</span></button>
-            <div class="location-status visible" id="locationStatus" aria-live="polite">
-              <span class="location-status-icon">✓</span>
-              <span><strong>Showing this address</strong><small id="locationAddress">1227 West Cedar Canyons Road</small></span>
-            </div>
-          </form>
-        </div>
-
-        <div class="progress-card">
-          <div class="progress-heading"><span>Measurement progress</span><strong id="progressValue">0%</strong></div>
-          <div class="progress-track"><i id="progressBar"></i></div>
-          <div class="progress-stats">
-            <div><strong id="lineCount">0</strong><span>Roof lines</span></div>
-            <div><strong id="areaValue">—</strong><span>Area sq ft</span></div>
-            <div><strong id="vertexCount">0</strong><span>Vertices</span></div>
-          </div>
+    <div class="app">
+      <aside class="sidebar" id="sidebar">
+        <a class="brand" href="#"><span class="brand-shape"><i></i><i></i><i></i></span><b>solo</b></a>
+        <button class="close-menu" id="closeMenu" aria-label="Close menu">×</button>
+        <nav>
+          <button class="nav-item active" data-view="home"><svg><use href="#i-home"/></svg><span>Home</span></button>
+          <button class="nav-item" data-view="agent"><svg><use href="#i-chat"/></svg><span>Ask Solo</span><i class="online-dot"></i></button>
+          <button class="nav-item" data-view="plan"><svg><use href="#i-plan"/></svg><span>My plan</span></button>
+          <button class="nav-item" data-view="documents"><svg><use href="#i-doc"/></svg><span>Documents</span></button>
+        </nav>
+        <div class="sidebar-bottom">
+          <div class="help-card"><span>✦</span><strong>Questions?</strong><p>Solo is here 24/7 to help with your project.</p><button data-open-chat>Ask Solo</button></div>
+          <button class="profile" id="editProfile"><span>TO</span><div><strong id="profileName">Tom O'Keefe</strong><small id="profileAddress">Add your home address</small></div><b>•••</b></button>
         </div>
       </aside>
 
-      <section class="workspace" aria-label="Roof editor">
-        <div class="map-stage" id="mapStage">
-          <div class="tile-layer" id="tileLayer" aria-label="Aerial imagery"></div>
-          <div class="searching-overlay" id="searchingOverlay" aria-hidden="true"><span></span><strong>Finding property…</strong></div>
-          <div class="map-location" id="mapLocation"><span>●</span><div><small>CURRENT PROPERTY</small><strong>1227 West Cedar Canyons Road</strong></div></div>
+      <div class="page">
+        <header class="topbar">
+          <button class="menu" id="menuBtn" aria-label="Open menu">☰</button>
+          <div class="mobile-brand">solo</div>
+          <div class="topbar-actions"><button class="agent-status" data-open-chat><i></i><span>Solo is online</span></button><button class="avatar">TO</button></div>
+        </header>
 
-          <div class="map-toolbar top-tools">
-            <button class="active magic-tool" data-tool="magic" aria-label="Magic lasso tool" title="Magic lasso">✦</button>
-            <button data-tool="trace" aria-label="Trace roof lines tool" title="Trace roof lines">⌁</button>
-            <button data-tool="line" aria-label="Connect roof planes tool" title="Connect roof planes">╱</button>
-            <button data-tool="vertex" aria-label="Add vertex tool" title="Add vertex">＋</button>
-            <button data-tool="remove" aria-label="Remove vertex tool" title="Remove vertex">−</button>
-            <button data-tool="move" aria-label="Move vertex tool" title="Move vertex">✥</button>
-            <button data-tool="pan" aria-label="Pan tool" title="Pan (or hold the middle mouse button)">✋</button>
-            <span></span>
-            <button id="undoBtn" aria-label="Undo">↶</button>
-            <button id="redoBtn" aria-label="Redo">↷</button>
-            <span></span>
-            <button id="togglePolygon" aria-label="Hide roof polygon" title="Toggle roof polygon" aria-pressed="true">◉</button>
-          </div>
+        <main>
+          <section class="view active" id="homeView">
+            <div class="hero-row">
+              <div><p class="eyebrow">YOUR HOME ENERGY JOURNEY</p><h1>Good morning, Tom.</h1><p class="lede">Let's build a smarter, more comfortable home—at your pace.</p></div>
+              <button class="talk-button" data-open-chat><span>✦</span><div><small>YOUR AI ENERGY AGENT</small><strong>Talk to Solo</strong></div><svg><use href="#i-arrow"/></svg></button>
+            </div>
 
-          <div class="zoom-tools map-toolbar">
-            <button id="zoomIn" aria-label="Zoom in">+</button><output id="zoomLevel" class="zoom-level" aria-label="Current zoom level">20</output><button id="zoomOut" aria-label="Zoom out">−</button>
-          </div>
+            <section class="journey-card">
+              <div class="journey-head"><div><span class="phase-label">YOUR PROJECT</span><h2>Roof &amp; energy plan</h2></div><span class="saved"><i></i> Saved just now</span></div>
+              <div class="steps">
+                <button class="step active" data-step="1"><span><b>1</b></span><div><small>01</small><strong>Tell us about your home</strong><em>Complete profile</em></div></button>
+                <i></i>
+                <button class="step" data-step="2"><span><b>2</b></span><div><small>02</small><strong>Explore your options</strong><em>Up next</em></div></button>
+                <i></i>
+                <button class="step" data-step="3"><span><b>3</b></span><div><small>03</small><strong>Design your system</strong><em>Up next</em></div></button>
+                <i></i>
+                <button class="step" data-step="4"><span><b>4</b></span><div><small>04</small><strong>Review &amp; qualify</strong><em>Not started</em></div></button>
+                <i></i>
+                <button class="step" data-step="5"><span><b>5</b></span><div><small>05</small><strong>Meet your installer</strong><em>Not started</em></div></button>
+              </div>
+            </section>
 
-          <canvas class="selection-mask" id="selectionMask" aria-hidden="true"></canvas>
-          <canvas class="vertex-magnifier" id="vertexMagnifier" width="112" height="112" aria-hidden="true"></canvas>
-          <svg class="roof-canvas" id="roofCanvas" viewBox="0 0 900 650" role="img" aria-label="Editable roof outline">
-            <defs>
-              <filter id="shadow"><feDropShadow dx="0" dy="8" stdDeviation="10" flood-opacity=".24"/></filter>
-            </defs>
-            <polygon class="roof-shadow" points="" />
-            <polygon class="roof-fill" id="roofFill" points="" />
-            <g id="planeLayer"></g>
-            <g id="lineLayer"></g>
-            <g id="vertexLayer"></g>
-            <g id="selectionPulse"></g>
-          </svg>
+            <div class="content-grid">
+              <section class="options-card"><div class="section-head"><div><span class="phase-label">RECOMMENDED FOR YOUR HOME</span><h2>Where would you like to start?</h2></div><button class="text-button" data-view-target="plan">View full plan →</button></div>
+                <div class="option-list">
+                  <button class="option selected" data-option="Roof replacement"><span class="option-icon roof"><svg><use href="#i-roof"/></svg></span><div><strong>Roof replacement</strong><p>Your roof is 19 years old. Replacing it now can protect your home and prepare it for solar.</p><em><i></i> Best place to start</em></div><b>→</b></button>
+                  <button class="option" data-option="Solar panels"><span class="option-icon solar"><svg><use href="#i-sun"/></svg></span><div><strong>Solar panels</strong><p>Offset an estimated 92% of your current electric bill with a custom rooftop system.</p><em>Estimated savings: $146/mo</em></div><b>→</b></button>
+                  <button class="option" data-option="Battery backup"><span class="option-icon battery"><svg><use href="#i-bolt"/></svg></span><div><strong>Battery backup</strong><p>Keep essentials running through outages and use more of the energy you make.</p><em>8 hours estimated backup</em></div><b>→</b></button>
+                </div>
+              </section>
 
-          <div class="magic-tip" id="magicTip">
-            <div class="spark">✦</div>
-            <div><strong>Paint across a roof with the magic lasso</strong><span>Paint the roof’s shape; we’ll preserve it and snap nearby points to visible edges.</span></div>
-            <button aria-label="Dismiss" id="dismissTip">×</button>
-          </div>
-
-          <div class="map-footer"><span>Source: Esri, Maxar, Earthstar Geographics</span><span>20 ft</span></div>
-        </div>
-
-        <div class="editor-panel" id="editorPanel">
-          <button class="sheet-toggle" id="sheetToggle" type="button" aria-expanded="false" aria-controls="editorPanel"><i></i><span>Roof tools &amp; steps</span><b>⌃</b></button>
-          <div class="editor-heading">
-            <div><span class="step-label" id="stepLabel">STEP 1 OF 3</span><h2 id="editorTitle">Select the roof</h2></div>
-            <div class="editor-actions"><button class="auto-classify" id="autoClassifyBtn" type="button">✦ Auto classify</button><button class="finish-button" id="finishBtn">Finish measurement <span>→</span></button></div>
-          </div>
-          <p class="editor-help" id="editorHelp">Roof lines are classified automatically. Select a colored line to review it, or choose a category to correct it.</p>
-          <section class="measurement-summary" id="measurementSummary" aria-live="polite" hidden>
-            <div><strong id="summaryPlanes">0</strong><span>Roof planes</span></div>
-            <div><strong id="summaryLines">0</strong><span>Classified lines</span></div>
-            <div><strong id="summaryArea">—</strong><span>Estimated area</span></div>
-            <p><b>✓ Measurement ready</b><span>Select “Edit measurement” if you need to make another adjustment.</span></p>
+              <aside class="insight-card"><div class="insight-top"><span>✦</span><small>SOLO'S INSIGHT</small></div><h3>Start with the roof.</h3><p>Based on your home's age and aerial imagery, your roof is the smart first step. Doing it with solar could save you time and money.</p><div class="property-visual"><div class="sky"></div><div class="house"><i></i></div><span class="scan scan-one"></span><span class="scan scan-two"></span><div class="property-tag"><i></i><span><small>ROOF CONDITION</small><strong>Replacement recommended</strong></span></div></div><button class="primary" id="reviewRoof">Review my roof <svg><use href="#i-arrow"/></svg></button><button class="secondary" data-open-chat>Why is this recommended?</button></aside>
+            </div>
+            <p class="trust"><svg><use href="#i-check"/></svg> Your information is private and never sold. You're always in control.</p>
           </section>
-          <div class="line-types" id="lineTypes">
-            <button class="line-type selected" data-type="Eave"><i class="swatch eave"></i><span><strong>Eave</strong><small>Lower roof edge</small></span><b>✓</b></button>
-            <button class="line-type" data-type="Ridge"><i class="swatch ridge"></i><span><strong>Ridge</strong><small>Highest point</small></span><b>R</b></button>
-            <button class="line-type" data-type="Hip"><i class="swatch hip"></i><span><strong>Hip</strong><small>Outside slope</small></span><b>H</b></button>
-            <button class="line-type" data-type="Valley"><i class="swatch valley"></i><span><strong>Valley</strong><small>Inside slope</small></span><b>V</b></button>
-            <button class="line-type" data-type="Rake"><i class="swatch rake"></i><span><strong>Rake</strong><small>Sloped edge</small></span><b>K</b></button>
-            <button class="add-line" id="addVertexBtn"><span>＋</span><strong>Add vertex</strong><small>Tap an edge</small></button>
-          </div>
-        </div>
-      </section>
-    </main>
+
+          <section class="view centered-view" id="planView"><span class="phase-label">YOUR PERSONALIZED PLAN</span><h1>One home. One clear plan.</h1><p>Explore projects in the order that makes the most sense for your home.</p><div class="plan-grid"><article><span>01</span><svg><use href="#i-roof"/></svg><h3>Replace your roof</h3><p>Recommended first based on estimated roof age and condition.</p><b>$14,200 – $18,600</b><button data-option="Roof replacement">Explore roof options</button></article><article><span>02</span><svg><use href="#i-sun"/></svg><h3>Add solar</h3><p>An 8.4 kW system could offset roughly 92% of your usage.</p><b>$146/mo est. savings</b><button data-option="Solar panels">Explore solar</button></article><article><span>03</span><svg><use href="#i-bolt"/></svg><h3>Store your power</h3><p>Battery backup adds resilience and helps maximize solar value.</p><b>8 hrs est. backup</b><button data-option="Battery backup">Explore batteries</button></article></div></section>
+
+          <section class="view centered-view" id="documentsView"><span class="phase-label">YOUR DOCUMENTS</span><h1>Everything in one place.</h1><p>Your designs, financing and signed documents will appear here.</p><div class="empty-state"><span><svg><use href="#i-doc"/></svg></span><h3>No documents yet</h3><p>Complete your home design to generate a personalized proposal.</p><button class="primary" id="startDesign">Start my design →</button></div></section>
+        </main>
+      </div>
+    </div>
+
+    <div class="chat-panel" id="chatPanel" aria-hidden="true"><div class="chat-head"><div class="solo-orb">✦</div><div><strong>Solo</strong><span><i></i> Your AI energy agent</span></div><button id="closeChat" aria-label="Close chat">×</button></div><div class="chat-body" id="chatBody"><div class="chat-intro"><span>✦</span><h2>Hi Tom, I'm Solo.</h2><p>I can help you research, design and understand your options—without any sales pressure.</p></div><div class="message agent">Where would you like to begin?</div><div class="quick-replies"><button>Why start with my roof?</button><button>How much could solar save?</button><button>What can I afford?</button></div></div><form class="chat-input" id="chatForm"><input id="chatInput" placeholder="Ask anything about your home…" autocomplete="off"><button aria-label="Send"><svg><use href="#i-arrow"/></svg></button></form></div>
+    <div class="scrim" id="scrim"></div>
+    <div class="modal profile-modal" id="profileModal" aria-hidden="true"><button class="modal-close" id="closeProfile">×</button><span class="phase-label">YOUR HOME PROFILE</span><h2>Tell Solo about your home.</h2><p>Use any address you own or are considering. You can update these details whenever you need to.</p><form id="profileForm"><label>Homeowner name<input id="homeownerName" name="name" autocomplete="name" placeholder="Your name" required></label><label class="full-field">Property address<input id="homeAddress" name="address" autocomplete="street-address" placeholder="Street address, city, state, ZIP" required><small>This address is used only to build your personalized home plan.</small></label><label>Home type<select id="homeType" name="type"><option>Single-family home</option><option>Townhome</option><option>Duplex</option><option>Other</option></select></label><label>Average electric bill<input id="electricBill" name="bill" type="number" min="0" inputmode="decimal" placeholder="$ per month"></label><label>Roof age<select id="roofAge" name="roofAge"><option value="">I'm not sure</option><option value="0-5 years">0–5 years</option><option value="6-10 years">6–10 years</option><option value="11-15 years">11–15 years</option><option value="16-20 years">16–20 years</option><option value="21+ years">21+ years</option></select></label><label>Primary goal<select id="homeGoal" name="goal"><option>Replace or repair my roof</option><option>Lower my energy bill</option><option>Prepare for outages</option><option>Explore all my options</option></select></label><div class="form-actions"><button type="button" class="secondary" id="cancelProfile">Cancel</button><button class="primary" type="submit">Save home profile →</button></div></form></div>
+    <div class="modal" id="roofModal" aria-hidden="true"><button class="modal-close" id="closeModal">×</button><span class="phase-label">AERIAL ROOF REVIEW</span><h2>We found your roof.</h2><p>Solo analyzed recent aerial imagery for a first look at your home's roof.</p><div class="roof-map"><div class="roads"></div><div class="aerial-roof"><i></i><b></b></div><svg viewBox="0 0 600 290"><polygon points="175,93 350,62 444,145 282,221 139,167"/><polyline points="175,93 282,154 350,62"/><polyline points="282,154 444,145"/></svg><span id="roofMapAddress">Your home</span></div><div class="roof-stats"><div><small>ESTIMATED AREA</small><strong>2,184 ft²</strong></div><div><small>ROOF AGE</small><strong id="roofAgeSummary">Not provided</strong></div><div><small>CONDITION</small><strong class="warn">Review advised</strong></div></div><button class="primary" id="continueDesign">Continue to roof design →</button></div>
     <div class="toast" id="toast" role="status"></div>
     <script type="module" src="/src/main.js"></script>
   </body>
